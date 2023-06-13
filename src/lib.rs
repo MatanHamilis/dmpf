@@ -1,6 +1,8 @@
 use std::ops::BitXorAssign;
 
+// mod big_state;
 mod dpf;
+mod trie;
 
 pub const BITS_IN_BYTE: usize = 8;
 pub const BITS_OF_SECURITY: usize = 128;
