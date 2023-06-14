@@ -191,6 +191,7 @@ impl AsMut<[u8]> for Node {
         unsafe { std::slice::from_raw_parts_mut(self.0.as_mut_ptr() as *mut u8, BYTES_OF_SECURITY) }
     }
 }
+#[derive(Clone)]
 pub(crate) struct ExpandedNode {
     pub nodes: Box<[Node]>,
     pub non_zero_point_count: usize,
@@ -484,18 +485,16 @@ pub(crate) fn tree_and_leaf_depth(alpha_len: usize, beta_len: usize) -> (usize, 
 
 pub(crate) fn convert(node: &Node, bits: usize) -> BitVec {
     let mut output = BitVec::new(bits);
-    convert_into(node, &mut output);
+    convert_into(node, &mut output.as_mut());
     output
 }
-pub(crate) fn convert_into(node: &Node, output: &mut BitVec) {
-    let bits = output.len;
-    if bits > BITS_OF_SECURITY {
-        // We should expand node
-        let nodes_num: u16 = ((output.len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY) as u16;
-        many_prg(node, 0..nodes_num as u16, output.as_mut());
+pub(crate) fn convert_into(node: &Node, output: &mut [Node]) {
+    let len = output.len();
+    if len > 1 {
+        many_prg(node, 0..len as u16, output);
     } else {
         // We don't have to expand node
-        output.fill(std::slice::from_ref(node));
+        output[0] = *node;
     }
 }
 impl DpfKey {
@@ -557,7 +556,7 @@ impl DpfKey {
         }
         let mut conv = convert(&seed_0, beta.len() << leaf_depth);
         last_cw.bitxor_assign(&conv);
-        convert_into(&seed_1, &mut conv);
+        convert_into(&seed_1, &mut conv.as_mut());
         last_cw.bitxor_assign(&conv);
         let first_key = DpfKey {
             root: roots.0,
@@ -602,7 +601,7 @@ impl DpfKey {
         if x.len() > self.cws.len() {
             let levels_packed = x.len() - self.cws.len();
             let mut bs = BitVec::new(self.output_bits << levels_packed);
-            convert_into(&s, &mut bs);
+            convert_into(&s, &mut bs.as_mut());
             if t {
                 bs.bitxor_assign(&self.last_cw);
             }
@@ -619,7 +618,7 @@ impl DpfKey {
                 output.set(i, bs.get(start + i));
             }
         } else {
-            convert_into(&s, output);
+            convert_into(&s, output.as_mut());
             if t {
                 output.bitxor_assign(&self.last_cw);
             }
@@ -641,7 +640,7 @@ impl DpfKey {
         'outer: loop {
             let depth = next_directions.len();
             if depth == tree_depth {
-                convert_into(&s, &mut output_container);
+                convert_into(&s, &mut output_container.as_mut());
                 if t {
                     output_container.bitxor_assign(&self.last_cw);
                 }
@@ -692,6 +691,14 @@ pub struct EvalAllResult {
     outputs_per_block: usize,
 }
 impl EvalAllResult {
+    pub fn new(nodes: Vec<Node>, output_bits: usize, leaf_depth: usize) -> Self {
+        EvalAllResult {
+            nodes,
+            output_bits,
+            blocks_per_output: (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY,
+            outputs_per_block: 1 << leaf_depth,
+        }
+    }
     pub fn get_item(&self, i: usize, output: &mut [Node]) {
         if self.output_bits == 0 {
             return;

@@ -7,6 +7,8 @@ use crate::dpf::convert_into;
 use crate::dpf::many_prg;
 use crate::dpf::tree_and_leaf_depth;
 use crate::dpf::BitVec;
+use crate::dpf::CorrectionWord;
+use crate::dpf::EvalAllResult;
 use crate::dpf::ExpandedNode;
 use crate::dpf::Node;
 use crate::trie::BinaryTrie;
@@ -197,18 +199,18 @@ fn gen_conv_cw(
     let (tree_depth, leaf_depth) = tree_and_leaf_depth(input_bits, output_bits);
     let single_output_nodes = (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
     let total_nodes = single_output_nodes * alphas_betas.len();
-    let mut nodes = BitVec::new(single_output_nodes * BITS_OF_SECURITY);
+    let mut nodes = vec![Node::default(); single_output_nodes];
     let mut cw = BigStateLastCorrectionWord::new(output_bits, t);
     for k in 0..t {
-        convert_into(&seed_0[k], &mut nodes);
+        convert_into(&seed_0[k], &mut nodes.as_mut());
         cw.set_output(k, nodes.as_ref());
-        convert_into(&seed_1[k], &mut nodes);
+        convert_into(&seed_1[k], &mut nodes.as_mut());
         cw.xor_output(k, nodes.as_ref());
         if single_output_nodes > 1 {
             cw.xor_output(k, alphas_betas[k].1.as_ref());
         } else {
             // The output is just a single node...
-            nodes.as_mut()[0] = Node::default();
+            nodes[0] = Node::default();
             let output_pos = {
                 let mut pos = 0;
                 for bit in tree_depth..input_bits {
@@ -219,7 +221,7 @@ fn gen_conv_cw(
             };
             let output_pos = output_pos * output_bits;
             for i in 0..output_bits {
-                nodes.as_mut()[0].set_bit(output_pos + i, alphas_betas[k].1.get(i));
+                nodes[0].set_bit(output_pos + i, alphas_betas[k].1.get(i));
             }
             cw.xor_output(k, nodes.as_ref());
         }
@@ -416,7 +418,7 @@ impl BigStateDpfKey {
                     output.bitxor_assign(in2);
                 });
         }
-        convert_into(&seed, y);
+        convert_into(&seed, y.as_mut());
         conv_correct_xor_into(&sign_container, &self.last_cw, y.as_mut());
         if x.len() > tree_depth {
             let pos_in_tree = {
@@ -433,14 +435,80 @@ impl BigStateDpfKey {
         }
         y.normalize();
     }
-    pub fn eval_all(&self, output: &mut [Node]) {
+    pub fn eval_all(&self) -> EvalAllResult {
+        let t = self.non_zero_point_count();
         let nodes_per_item = (self.output_len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_len, self.output_len);
         let items_per_node = 1 << leaf_depth;
         let total_nodes = (1 << tree_depth) * nodes_per_item;
-        assert_eq!(output.len(), total_nodes);
-        // let mut directions = Vec::with_capacity(tree_depth);
-        for i in 0..tree_depth {}
+        let mut output = Vec::with_capacity(total_nodes);
+        unsafe { output.set_len(total_nodes) };
+        let mut directions = Vec::with_capacity(tree_depth);
+        let (mut sign_container_static, mut correction_container, mut expansion_container) =
+            self.make_aux_variables();
+        sign_container_static.set(0, self.root_sign);
+        let mut sign_container = &mut sign_container_static;
+        let mut tmp_storage = vec![sign_container.clone(); tree_depth];
+        let mut seed = self.root;
+        let mut output_iter = output.chunks_mut(nodes_per_item);
+        'outer: loop {
+            let depth = directions.len();
+            if depth == tree_depth {
+                let output_container = output_iter.next().unwrap();
+                convert_into(&seed, output_container);
+                conv_correct_xor_into(&sign_container, &self.last_cw, output_container);
+                loop {
+                    let (dir, s_r): (bool, Node) = match directions.pop() {
+                        None => break 'outer,
+                        Some(tuple) => tuple,
+                    };
+                    if !dir {
+                        // We finished left, go to right
+                        sign_container = &mut tmp_storage[directions.len()];
+                        seed = s_r;
+                        directions.push((true, seed));
+                        break;
+                    }
+                    // Otherwise we finished right, keep going up
+                }
+            } else {
+                expansion_container.fill_all(&seed);
+                self.cws[depth].correct(sign_container, &mut correction_container[..]);
+                seed = *expansion_container.get_node(false);
+                seed.bitxor_assign(&correction_container[0]);
+                let mut seed_right = *expansion_container.get_node(true);
+                seed_right.bitxor_assign(&correction_container[0]);
+                sign_container_static
+                    .as_mut()
+                    .iter_mut()
+                    .zip(expansion_container.get_bits_direction(false).iter())
+                    .zip(BigStateCorrectionWord::get_bits(
+                        &correction_container,
+                        false,
+                        t,
+                    ))
+                    .for_each(|((output, in1), in2)| {
+                        *output = *in1;
+                        output.bitxor_assign(in2);
+                    });
+                tmp_storage[depth]
+                    .as_mut()
+                    .iter_mut()
+                    .zip(expansion_container.get_bits_direction(true).iter())
+                    .zip(BigStateCorrectionWord::get_bits(
+                        &correction_container,
+                        true,
+                        t,
+                    ))
+                    .for_each(|((output, in1), in2)| {
+                        *output = *in1;
+                        output.bitxor_assign(in2);
+                    });
+                directions.push((false, seed_right));
+                sign_container = &mut sign_container_static;
+            }
+        }
+        EvalAllResult::new(output, self.output_len, leaf_depth)
     }
 }
 
@@ -448,11 +516,13 @@ impl BigStateDpfKey {
 mod test {
     use std::{collections::HashMap, ops::BitXorAssign};
 
+    use aes_prng::AesRng;
     use rand::{thread_rng, RngCore};
 
     use crate::{
         big_state::BigStateDpfKey,
         dpf::{int_to_bits, BitVec, Node},
+        BITS_OF_SECURITY,
     };
 
     #[test]
@@ -508,6 +578,51 @@ mod test {
                 let beta_bitvec = ab_map.get(&i).unwrap();
                 output_0.bitxor_assign(&output_1);
                 assert_eq!(&output_0, beta_bitvec);
+            }
+        }
+    }
+    #[test]
+    fn test_dpf_evalall() {
+        const DEPTH: usize = 11;
+        const OUTPUT_WIDTH: usize = 1102;
+        const POINTS: usize = 103;
+        let mut rng = thread_rng();
+        let root_0 = Node::random(&mut rng);
+        let root_1 = Node::random(&mut rng);
+        let roots = (root_0, root_1);
+        let mut alphas_betas = Vec::new();
+        let mut ab_map = HashMap::new();
+        while ab_map.len() < POINTS {
+            let alpha_idx = (rng.next_u32() as usize) & ((1 << DEPTH) - 1);
+            if ab_map.contains_key(&alpha_idx) {
+                continue;
+            }
+            let alpha: Vec<_> = int_to_bits(alpha_idx, DEPTH);
+            let alpha_v = BitVec::from(&alpha[..]);
+            let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
+            let beta_bitvec = BitVec::from(&beta[..]);
+            ab_map.insert(alpha_idx, beta_bitvec.clone());
+            alphas_betas.push((alpha_v, beta_bitvec));
+        }
+        alphas_betas.sort();
+        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, roots);
+        let ev_all_0 = k_0.eval_all();
+        let ev_all_1 = k_1.eval_all();
+        let blocks_per_output = (OUTPUT_WIDTH + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
+        let mut output_0 = vec![Node::default(); blocks_per_output];
+        let mut output_1 = vec![Node::default(); blocks_per_output];
+        for i in 0usize..1 << DEPTH {
+            ev_all_0.get_item(i, &mut output_0);
+            ev_all_1.get_item(i, &mut output_1);
+            if !ab_map.contains_key(&i) {
+                assert_eq!(output_0, output_1);
+            } else {
+                let beta_bitvec = ab_map.get(&i).unwrap();
+                output_0
+                    .iter_mut()
+                    .zip(output_1.iter())
+                    .for_each(|(output, input)| output.bitxor_assign(input));
+                assert_eq!(output_0, beta_bitvec.as_ref());
             }
         }
     }
