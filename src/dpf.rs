@@ -273,7 +273,7 @@ impl PartialOrd for BitVec {
 impl BitVec {
     pub fn fill(&mut self, nodes: &[Node]) {
         self.v.copy_from_slice(nodes);
-        self.normalize();
+        // self.normalize();
     }
     pub fn new(len: usize) -> Self {
         let nodes = (len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
@@ -300,7 +300,7 @@ impl BitVec {
         let (cell, idx) = Self::coordinates(index);
         self.v[cell].set_bit(idx, val);
     }
-    fn normalize(&mut self) {
+    pub(crate) fn normalize(&mut self) {
         let bits_to_leave = self.len & (BITS_OF_SECURITY - 1);
         let bits_to_leave = ((bits_to_leave + BITS_OF_SECURITY - 1) % BITS_OF_SECURITY) + 1;
         self.v.last_mut().unwrap().mask(bits_to_leave);
@@ -763,8 +763,8 @@ mod tests {
 
     #[test]
     fn test_dpf_evalall() {
-        const DEPTH: usize = 5;
-        const OUTPUT_WIDTH: usize = 1;
+        const DEPTH: usize = 8;
+        const OUTPUT_WIDTH: usize = 3;
         let mut rng = AesRng::from_random_seed();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
@@ -791,6 +791,17 @@ mod tests {
                     .for_each(|(output, input)| output.bitxor_assign(input));
                 assert_eq!(output_0, beta_bitvec.as_ref());
             }
+        }
+    }
+    #[test]
+    fn test_bitvec_comparison() {
+        const DEPTH: usize = 3;
+        for i in 1..1 << DEPTH {
+            let cur = int_to_bits(i, DEPTH);
+            let prev = int_to_bits(i - 1, DEPTH);
+            let cur_bv = BitVec::from(&cur[..]);
+            let prev_bv = BitVec::from(&prev[..]);
+            assert!(cur_bv > prev_bv);
         }
     }
 }

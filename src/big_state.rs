@@ -261,13 +261,17 @@ impl BigStateDpfKey {
         let t = alphas_betas.len();
         let input_bits = alphas_betas[0].0.len();
         let output_bits = alphas_betas[0].1.len();
-        let mut seed_0 = vec![Node::default(); t];
-        let mut seed_1 = vec![Node::default(); t];
-        seed_0[0] = roots.0;
-        seed_1[0] = roots.1;
-        let mut sign_0 = vec![BitVec::new(t); t];
-        let mut sign_1 = vec![BitVec::new(t); t];
-        sign_1[0].set(0, true);
+        let mut seed_0_a = vec![Node::default(); t];
+        let mut seed_1_a = vec![Node::default(); t];
+        let mut seed_0_b = vec![Node::default(); t];
+        let mut seed_1_b = vec![Node::default(); t];
+        seed_0_a[0] = roots.0;
+        seed_1_a[0] = roots.1;
+        let mut sign_0_a = vec![BitVec::new(t); t];
+        let mut sign_1_a = vec![BitVec::new(t); t];
+        let mut sign_0_b = vec![BitVec::new(t); t];
+        let mut sign_1_b = vec![BitVec::new(t); t];
+        sign_1_a[0].set(0, true);
         let mut container_0 = ExpandedNode::new(t);
         let mut container_1 = ExpandedNode::new(t);
         let (tree_depth, leaf_depth) = tree_and_leaf_depth(input_bits, output_bits);
@@ -276,32 +280,40 @@ impl BigStateDpfKey {
         let mut correction_container_1 =
             vec![Node::default(); BigStateCorrectionWord::single_node_count(t)];
         let mut cws = Vec::with_capacity(tree_depth);
+        let mut seed_0_prev = &mut seed_0_a;
+        let mut seed_0_cur = &mut seed_0_b;
+        let mut seed_1_prev = &mut seed_1_a;
+        let mut seed_1_cur = &mut seed_1_b;
+        let mut sign_0_prev = &mut sign_0_a;
+        let mut sign_0_cur = &mut sign_0_b;
+        let mut sign_1_prev = &mut sign_1_a;
+        let mut sign_1_cur = &mut sign_1_b;
         for i in 0..tree_depth {
             let cw = gen_cw(
                 i,
                 &alphas,
-                &seed_0,
-                &seed_1,
+                &seed_0_prev,
+                &seed_1_prev,
                 &mut container_0,
                 &mut container_1,
             );
             let mut state_idx = 0;
             for (k, node) in alphas.iter_at_depth(i).enumerate() {
-                cw.correct(&sign_0[k], &mut correction_container_0);
-                cw.correct(&sign_1[k], &mut correction_container_1);
-                container_0.fill_all(&seed_0[k]);
-                container_1.fill_all(&seed_1[k]);
+                cw.correct(&sign_0_prev[k], &mut correction_container_0);
+                cw.correct(&sign_1_prev[k], &mut correction_container_1);
+                container_0.fill_all(&seed_0_prev[k]);
+                container_1.fill_all(&seed_1_prev[k]);
                 for z in [false, true] {
                     if node.borrow().get_son(z).is_some() {
                         // Handle seed.
                         // First key
                         let node = container_0.get_node(z);
-                        seed_0[state_idx] = correction_container_0[0];
-                        seed_0[state_idx].bitxor_assign(node);
+                        seed_0_cur[state_idx] = correction_container_0[0];
+                        seed_0_cur[state_idx].bitxor_assign(node);
                         // Second key
                         let node = container_1.get_node(z);
-                        seed_1[state_idx] = correction_container_1[0];
-                        seed_1[state_idx].bitxor_assign(node);
+                        seed_1_cur[state_idx] = correction_container_1[0];
+                        seed_1_cur[state_idx].bitxor_assign(node);
 
                         // Handle sign.
                         let expanded_bits_0 = container_0.get_bits_direction(z);
@@ -310,7 +322,7 @@ impl BigStateDpfKey {
                             BigStateCorrectionWord::get_bits(&correction_container_0, z, t);
                         let correction_bits_1 =
                             BigStateCorrectionWord::get_bits(&correction_container_1, z, t);
-                        sign_0[state_idx]
+                        sign_0_cur[state_idx]
                             .as_mut()
                             .iter_mut()
                             .zip(expanded_bits_0.iter())
@@ -319,7 +331,7 @@ impl BigStateDpfKey {
                                 *out = *in1;
                                 out.bitxor_assign(in2);
                             });
-                        sign_1[state_idx]
+                        sign_1_cur[state_idx]
                             .as_mut()
                             .iter_mut()
                             .zip(expanded_bits_1.iter())
@@ -333,9 +345,13 @@ impl BigStateDpfKey {
                 }
             }
             cws.push(cw);
+            (sign_0_prev, sign_0_cur) = (sign_0_cur, sign_0_prev);
+            (sign_1_prev, sign_1_cur) = (sign_1_cur, sign_1_prev);
+            (seed_0_prev, seed_0_cur) = (seed_0_cur, seed_0_prev);
+            (seed_1_prev, seed_1_cur) = (seed_1_cur, seed_1_prev);
         }
         // Handle last CW.
-        let last_cw = gen_conv_cw(alphas_betas, &seed_0, &seed_1);
+        let last_cw = gen_conv_cw(alphas_betas, &seed_0_prev, &seed_1_prev);
         let first_key = BigStateDpfKey {
             root: roots.0,
             root_sign: false,
@@ -415,6 +431,16 @@ impl BigStateDpfKey {
             y.as_mut()[0].shr((BITS_OF_SECURITY - idx_start - self.output_len) as u32);
             y.as_mut()[0].shl((BITS_OF_SECURITY - self.output_len) as u32);
         }
+        y.normalize();
+    }
+    pub fn eval_all(&self, output: &mut [Node]) {
+        let nodes_per_item = (self.output_len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
+        let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_len, self.output_len);
+        let items_per_node = 1 << leaf_depth;
+        let total_nodes = (1 << tree_depth) * nodes_per_item;
+        assert_eq!(output.len(), total_nodes);
+        // let mut directions = Vec::with_capacity(tree_depth);
+        for i in 0..tree_depth {}
     }
 }
 
@@ -431,9 +457,9 @@ mod test {
 
     #[test]
     fn test_dpf_single_point() {
-        const DEPTH: usize = 2;
-        const OUTPUT_WIDTH: usize = 128;
-        const POINTS: usize = 4;
+        const DEPTH: usize = 13;
+        const OUTPUT_WIDTH: usize = 4;
+        const POINTS: usize = 10;
         let mut rng = thread_rng();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
