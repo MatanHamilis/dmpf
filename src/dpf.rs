@@ -72,9 +72,17 @@ pub fn many_prg(
         });
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord)]
+pub struct NodeBitStructs<'a> {
+    node: &'a mut Node,
+    bit_width: usize,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, Hash)]
 pub struct Node([u64; BYTES_OF_SECURITY / 8]);
 impl Node {
+    pub fn zero(&mut self) {
+        self.0[0] = 0;
+        self.0[1] = 0;
+    }
     pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
         let mut output = Node::default();
         output.fill(rng);
@@ -90,6 +98,32 @@ impl Node {
             63 - (index & (u64::BITS as usize - 1)),
         )
     }
+    pub fn shl(&mut self, mut amount: u32) {
+        if amount >= 64 {
+            self.0[0] = self.0[1];
+            self.0[1] = 0;
+            amount -= 64;
+        }
+        if amount == 0 {
+            return;
+        }
+        self.0[0] = self.0[0].overflowing_shl(amount).0;
+        self.0[0] |= self.0[1].overflowing_shr(64 - amount).0;
+        self.0[1] = self.0[1].overflowing_shl(amount).0;
+    }
+    pub fn shr(&mut self, mut amount: u32) {
+        if amount >= 64 {
+            self.0[1] = self.0[0];
+            self.0[0] = 0;
+            amount -= 64;
+        }
+        if amount == 0 {
+            return;
+        }
+        self.0[1] = self.0[1].overflowing_shr(amount).0;
+        self.0[1] |= self.0[0].overflowing_shl(64 - amount).0;
+        self.0[0] = self.0[0].overflowing_shr(amount).0;
+    }
     pub fn get_bit(&self, index: usize) -> bool {
         let (cell, bit) = Self::coordinates(index);
         self.0[cell] >> bit & 1 == 1
@@ -104,13 +138,8 @@ impl Node {
         self.0[cell] ^= 1 << bit;
     }
     pub fn mask(&mut self, bits: usize) {
-        let index_to_mask = bits / (u64::BITS as usize);
-        if index_to_mask >= self.0.len() {
-            return;
-        }
-        let (mask, _) = u64::overflowing_shl(1, (bits & 63) as u32);
-        let mask = mask.wrapping_sub(1);
-        self.0[index_to_mask] &= mask;
+        self.shr((BITS_OF_SECURITY - bits) as u32);
+        self.shl((BITS_OF_SECURITY - bits) as u32);
     }
     pub fn cmp_first_bits(&self, other: &Self, i: usize) -> Ordering {
         if i >= BITS_OF_SECURITY {
@@ -180,7 +209,11 @@ impl ExpandedNode {
     pub fn fill(&mut self, node: &Node, direction: bool) {
         let start = direction as u16;
         let end = start + self.nodes.len() as u16 - 1;
-        many_prg(node, start..end, &mut self.nodes);
+        many_prg(
+            node,
+            start..end,
+            &mut self.nodes[start as usize..end as usize],
+        );
     }
     pub fn get_bit(&self, idx: usize, direction: bool) -> bool {
         let bits = self.get_bits_direction(direction);
@@ -207,7 +240,7 @@ impl ExpandedNode {
         &self.nodes[node..node + direction_len]
     }
 }
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash, Ord)]
 pub struct BitVec {
     v: Box<[Node]>,
     len: usize,
@@ -592,13 +625,10 @@ impl DpfKey {
             }
         }
     }
-    // This is recommended if there's a small number of bits in the output an so it generates a very compact output.
-    pub fn eval_all_bits(&self) -> Vec<Node> {
+    pub fn eval_all(&self) -> EvalAllResult {
         const BATCH_SIZE: usize = 1;
         let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_bits, self.output_bits);
-        if self.input_bits == 0 {
-            return Vec::new();
-        }
+        let blocks_per_output = (self.output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let total_items = 1 << (self.input_bits - leaf_depth);
         let mut output_vec = Vec::with_capacity(total_items);
         let mut output_container = BitVec::new(self.output_bits << leaf_depth);
@@ -647,7 +677,35 @@ impl DpfKey {
                 t = t_l;
             }
         }
-        output_vec
+        EvalAllResult {
+            nodes: output_vec,
+            output_bits: self.output_bits,
+            outputs_per_block: 1 << leaf_depth,
+            blocks_per_output,
+        }
+    }
+}
+pub struct EvalAllResult {
+    nodes: Vec<Node>,
+    output_bits: usize,
+    blocks_per_output: usize,
+    outputs_per_block: usize,
+}
+impl EvalAllResult {
+    pub fn get_item(&self, i: usize, output: &mut [Node]) {
+        if self.output_bits == 0 {
+            return;
+        }
+        assert_eq!(output.len(), self.blocks_per_output);
+        let coord = i * self.blocks_per_output / self.outputs_per_block;
+        let idx_in_block = i % self.outputs_per_block;
+        let start_bit = idx_in_block * self.output_bits;
+        output.copy_from_slice(&self.nodes[coord..coord + self.blocks_per_output]);
+        if self.outputs_per_block > 1 {
+            // clearing other bits
+            output[0].shr((BITS_OF_SECURITY - start_bit - self.output_bits) as u32);
+            output[0].shl((BITS_OF_SECURITY - self.output_bits) as u32);
+        }
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {
@@ -666,7 +724,7 @@ mod tests {
     use aes_prng::AesRng;
     use rand::{thread_rng, RngCore};
 
-    use crate::dpf::{int_to_bits, BitVec};
+    use crate::dpf::{int_to_bits, tree_and_leaf_depth, BitVec};
 
     use super::{DpfKey, Node};
 
@@ -705,8 +763,8 @@ mod tests {
 
     #[test]
     fn test_dpf_evalall() {
-        const DEPTH: usize = 10;
-        const OUTPUT_WIDTH: usize = 65;
+        const DEPTH: usize = 5;
+        const OUTPUT_WIDTH: usize = 1;
         let mut rng = AesRng::from_random_seed();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
@@ -717,19 +775,21 @@ mod tests {
         let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
         let beta_bitvec = BitVec::from(&beta[..]);
         let (k_0, k_1) = DpfKey::gen(roots, alpha_v, (&beta[..]).into());
-        let ev_all_0 = k_0.eval_all_bits();
-        let ev_all_1 = k_1.eval_all_bits();
+        let ev_all_0 = k_0.eval_all();
+        let ev_all_1 = k_1.eval_all();
+        let mut output_0 = vec![Node::default(); ev_all_0.blocks_per_output];
+        let mut output_1 = vec![Node::default(); ev_all_1.blocks_per_output];
         for i in 0usize..1 << DEPTH {
-            let bits_i = int_to_bits(i, DEPTH);
-            let input = BitVec::from(&bits_i[..]);
+            ev_all_0.get_item(i, &mut output_0);
+            ev_all_1.get_item(i, &mut output_1);
             if i != alpha_idx {
-                assert_eq!(&ev_all_0[i], &ev_all_1[i]);
-            }
-            if i == alpha_idx {
-                let mut xors = ev_all_1[i];
-                xors.bitxor_assign(&ev_all_0[i]);
-                let t = beta_bitvec.v[0];
-                assert_eq!(t, xors);
+                assert_eq!(output_0, output_1);
+            } else {
+                output_0
+                    .iter_mut()
+                    .zip(output_1.iter())
+                    .for_each(|(output, input)| output.bitxor_assign(input));
+                assert_eq!(output_0, beta_bitvec.as_ref());
             }
         }
     }

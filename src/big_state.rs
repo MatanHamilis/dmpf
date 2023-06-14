@@ -1,11 +1,11 @@
 use std::ops::BitXorAssign;
 
+use aes::cipher::typenum::Exp;
 use aes_prng::AesRng;
 
 use crate::dpf::convert_into;
 use crate::dpf::many_prg;
 use crate::dpf::tree_and_leaf_depth;
-use crate::dpf::BitSliceMut;
 use crate::dpf::BitVec;
 use crate::dpf::ExpandedNode;
 use crate::dpf::Node;
@@ -20,7 +20,7 @@ pub struct BigStateLastCorrectionWord {
 }
 impl BigStateLastCorrectionWord {
     fn new(output_bits: usize, point_count: usize) -> Self {
-        let nodes_for_single_output = (output_bits + BITS_OF_SECURITY - 1) / output_bits;
+        let nodes_for_single_output = (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let total_nodes = nodes_for_single_output * point_count;
         Self {
             nodes: Box::from(vec![Node::default(); total_nodes]),
@@ -28,13 +28,15 @@ impl BigStateLastCorrectionWord {
         }
     }
     fn set_output(&mut self, output_idx: usize, nodes: &[Node]) {
+        let start = output_idx * self.nodes_per_output;
         for i in 0..self.nodes_per_output {
-            self.nodes[i] = nodes[i];
+            self.nodes[start + i] = nodes[i];
         }
     }
     fn xor_output(&mut self, output_idx: usize, nodes: &[Node]) {
+        let start = output_idx * self.nodes_per_output;
         for i in 0..self.nodes_per_output {
-            self.nodes[i] ^= &nodes[i];
+            self.nodes[start + i] ^= &nodes[i];
         }
     }
 }
@@ -55,11 +57,11 @@ impl BigStateCorrectionWord {
     }
     pub fn get_entry(&self, index: usize, t: usize) -> &[Node] {
         let single_value_node_count = Self::single_node_count(t);
-        &self.nodes[t * index..t * (index + 1)]
+        &self.nodes[single_value_node_count * index..single_value_node_count * (index + 1)]
     }
     pub fn get_entry_mut(&mut self, index: usize, t: usize) -> &mut [Node] {
         let single_value_node_count = Self::single_node_count(t);
-        &mut self.nodes[t * index..t * (index + 1)]
+        &mut self.nodes[single_value_node_count * index..single_value_node_count * (index + 1)]
     }
     pub fn set_node(&mut self, node: &Node, index: usize, t: usize) {
         let entry = self.get_entry_mut(index, t);
@@ -67,9 +69,9 @@ impl BigStateCorrectionWord {
     }
     fn bit_coords(index: usize, direction: bool, t: usize) -> (usize, usize) {
         let single_count = Self::single_node_count(t);
-        let index = (direction as usize) * single_count + index;
+        let bits_node_per_direction = (single_count - 1) / 2;
+        let entry = 1 + (index / BITS_OF_SECURITY) + (direction as usize) * bits_node_per_direction;
         let bit_index = index & (BITS_OF_SECURITY - 1);
-        let entry = index / BITS_OF_SECURITY + (direction as usize) * single_count;
         (entry, bit_index)
     }
     pub fn set_bit(
@@ -120,6 +122,7 @@ impl BigStateCorrectionWord {
     }
     pub fn correct(&self, sign: &BitVec, output: &mut [Node]) {
         let t = sign.len();
+        output.iter_mut().for_each(|node| node.zero());
         for i in 0..sign.len() {
             let bit = sign.get(i);
             let entry = self.get_entry(i, t);
@@ -153,7 +156,7 @@ fn gen_cw(
                 .collect::<Vec<_>>(),
         ),
     };
-    let mut iter = alphas.iter_at_depth(i);
+    let iter = alphas.iter_at_depth(i);
     let mut next_idx: usize = 0;
     iter.enumerate().for_each(|(idx, node)| {
         container_0.fill_all(&seed_0[idx]);
@@ -166,10 +169,8 @@ fn gen_cw(
         let left_son = node.borrow().get_son(false);
         let right_son = node.borrow().get_son(true);
         let d = next_idx;
-        for i in 0..t {
-            cw.set_bits_from(idx, t, container_0.get_bits());
-            cw.xor_bits_from(idx, t, container_1.get_bits());
-        }
+        cw.set_bits_from(idx, t, container_0.get_bits());
+        cw.xor_bits_from(idx, t, container_1.get_bits());
         if left_son.is_some() && right_son.is_some() {
             next_idx += 2;
             let r = Node::random(&mut rng);
@@ -196,18 +197,18 @@ fn gen_conv_cw(
     let (tree_depth, leaf_depth) = tree_and_leaf_depth(input_bits, output_bits);
     let single_output_nodes = (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
     let total_nodes = single_output_nodes * alphas_betas.len();
-    let mut nodes = vec![Node::default(); single_output_nodes];
+    let mut nodes = BitVec::new(single_output_nodes * BITS_OF_SECURITY);
     let mut cw = BigStateLastCorrectionWord::new(output_bits, t);
     for k in 0..t {
-        many_prg(&seed_0[k], 0..single_output_nodes as u16, &mut nodes);
-        cw.set_output(k, &nodes);
-        many_prg(&seed_1[k], 0..single_output_nodes as u16, &mut nodes);
-        cw.xor_output(k, &nodes);
+        convert_into(&seed_0[k], &mut nodes);
+        cw.set_output(k, nodes.as_ref());
+        convert_into(&seed_1[k], &mut nodes);
+        cw.xor_output(k, nodes.as_ref());
         if single_output_nodes > 1 {
             cw.xor_output(k, alphas_betas[k].1.as_ref());
         } else {
             // The output is just a single node...
-            nodes[0] = Node::default();
+            nodes.as_mut()[0] = Node::default();
             let output_pos = {
                 let mut pos = 0;
                 for bit in tree_depth..input_bits {
@@ -218,14 +219,14 @@ fn gen_conv_cw(
             };
             let output_pos = output_pos * output_bits;
             for i in 0..output_bits {
-                nodes[0].set_bit(output_pos + i, alphas_betas[k].1.get(i));
+                nodes.as_mut()[0].set_bit(output_pos + i, alphas_betas[k].1.get(i));
             }
-            cw.xor_output(k, &nodes);
+            cw.xor_output(k, nodes.as_ref());
         }
     }
     cw
 }
-fn conv_correct_xor_into(sign: &BitVec, cw: &BigStateLastCorrectionWord, output: &[Node]) {
+fn conv_correct_xor_into(sign: &BitVec, cw: &BigStateLastCorrectionWord, output: &mut [Node]) {
     cw.nodes
         .chunks_exact(cw.nodes_per_output)
         .enumerate()
@@ -295,12 +296,12 @@ impl BigStateDpfKey {
                         // Handle seed.
                         // First key
                         let node = container_0.get_node(z);
-                        correction_container_0[0].bitxor_assign(node);
                         seed_0[state_idx] = correction_container_0[0];
+                        seed_0[state_idx].bitxor_assign(node);
                         // Second key
                         let node = container_1.get_node(z);
-                        correction_container_1[0].bitxor_assign(node);
                         seed_1[state_idx] = correction_container_1[0];
+                        seed_1[state_idx].bitxor_assign(node);
 
                         // Handle sign.
                         let expanded_bits_0 = container_0.get_bits_direction(z);
@@ -315,7 +316,7 @@ impl BigStateDpfKey {
                             .zip(expanded_bits_0.iter())
                             .zip(correction_bits_0.iter())
                             .for_each(|((out, in1), in2)| {
-                                out.bitxor_assign(in1);
+                                *out = *in1;
                                 out.bitxor_assign(in2);
                             });
                         sign_1[state_idx]
@@ -324,7 +325,7 @@ impl BigStateDpfKey {
                             .zip(expanded_bits_1.iter())
                             .zip(correction_bits_1.iter())
                             .for_each(|((out, in1), in2)| {
-                                out.bitxor_assign(in1);
+                                *out = *in1;
                                 out.bitxor_assign(in2);
                             });
                         state_idx += 1;
@@ -355,6 +356,14 @@ impl BigStateDpfKey {
     }
     fn non_zero_point_count(&self) -> usize {
         self.last_cw.nodes.len() / self.last_cw.nodes_per_output
+    }
+    pub fn make_aux_variables(&self) -> (BitVec, Box<[Node]>, ExpandedNode) {
+        let t = self.non_zero_point_count();
+        let sign_contianer = BitVec::new(t);
+        let correction_container =
+            vec![Node::default(); BigStateCorrectionWord::single_node_count(t)];
+        let expanded_node = ExpandedNode::new(t);
+        (sign_contianer, correction_container.into(), expanded_node)
     }
     pub fn eval(
         &self,
@@ -391,11 +400,89 @@ impl BigStateDpfKey {
                     output.bitxor_assign(in2);
                 });
         }
-        if self.output_len >= BITS_OF_SECURITY {
-            //easy
-            let mut bit_slice = BitSliceMut::from(y);
-            convert_into(&seed, &mut bit_slice);
-            conv_correct_xor_into(&sign_container, &self.last_cw, y.as_mut());
+        convert_into(&seed, y);
+        conv_correct_xor_into(&sign_container, &self.last_cw, y.as_mut());
+        if x.len() > tree_depth {
+            let pos_in_tree = {
+                let mut pos = 0;
+                for idx in tree_depth..x.len() {
+                    pos <<= 1;
+                    pos ^= x.get(idx) as usize;
+                }
+                pos
+            };
+            let idx_start = pos_in_tree * self.output_len;
+            y.as_mut()[0].shr((BITS_OF_SECURITY - idx_start - self.output_len) as u32);
+            y.as_mut()[0].shl((BITS_OF_SECURITY - self.output_len) as u32);
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{collections::HashMap, ops::BitXorAssign};
+
+    use rand::{thread_rng, RngCore};
+
+    use crate::{
+        big_state::BigStateDpfKey,
+        dpf::{int_to_bits, BitVec, Node},
+    };
+
+    #[test]
+    fn test_dpf_single_point() {
+        const DEPTH: usize = 2;
+        const OUTPUT_WIDTH: usize = 128;
+        const POINTS: usize = 4;
+        let mut rng = thread_rng();
+        let root_0 = Node::random(&mut rng);
+        let root_1 = Node::random(&mut rng);
+        let roots = (root_0, root_1);
+        let mut alphas_betas = Vec::new();
+        let mut ab_map = HashMap::new();
+        while ab_map.len() < POINTS {
+            let alpha_idx = (rng.next_u32() as usize) & ((1 << DEPTH) - 1);
+            if ab_map.contains_key(&alpha_idx) {
+                continue;
+            }
+            let alpha: Vec<_> = int_to_bits(alpha_idx, DEPTH);
+            let alpha_v = BitVec::from(&alpha[..]);
+            let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
+            let beta_bitvec = BitVec::from(&beta[..]);
+            ab_map.insert(alpha_idx, beta_bitvec.clone());
+            alphas_betas.push((alpha_v, beta_bitvec));
+        }
+        alphas_betas.sort();
+        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, roots);
+        let mut output_0 = BitVec::new(OUTPUT_WIDTH);
+        let mut output_1 = BitVec::new(OUTPUT_WIDTH);
+        let (mut signs, mut corrections, mut expanded_node) = k_0.make_aux_variables();
+        for i in 0usize..1 << DEPTH {
+            let bits_i = int_to_bits(i, DEPTH);
+            let input = BitVec::from(&bits_i[..]);
+            let mut bs_output_0 = &mut output_0;
+            let mut bs_output_1 = &mut output_1;
+            k_0.eval(
+                &input,
+                &mut bs_output_0,
+                &mut signs,
+                &mut corrections,
+                &mut expanded_node,
+            );
+            k_1.eval(
+                &input,
+                &mut bs_output_1,
+                &mut signs,
+                &mut corrections,
+                &mut expanded_node,
+            );
+            if !ab_map.contains_key(&i) {
+                assert_eq!(&bs_output_0, &bs_output_1);
+            } else {
+                let beta_bitvec = ab_map.get(&i).unwrap();
+                output_0.bitxor_assign(&output_1);
+                assert_eq!(&output_0, beta_bitvec);
+            }
         }
     }
 }
