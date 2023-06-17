@@ -13,3 +13,8 @@ once_cell = "1"
 
 [dev-dependencies]
 aes-prng = "0.2"
+criterion = "0.3"
+
+[[bench]]
+name = "dpf"
+harness = false

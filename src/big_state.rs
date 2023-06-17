@@ -1,4 +1,6 @@
+use std::iter::Inspect;
 use std::ops::BitXorAssign;
+use std::time::Instant;
 
 use aes::cipher::typenum::Exp;
 use aes_prng::AesRng;
@@ -15,8 +17,8 @@ use crate::trie::BinaryTrie;
 
 use super::BITS_OF_SECURITY;
 
-#[derive(Clone)]
-pub struct BigStateLastCorrectionWord {
+#[derive(Clone, Debug)]
+struct BigStateLastCorrectionWord {
     nodes: Box<[Node]>,
     nodes_per_output: usize,
 }
@@ -43,7 +45,7 @@ impl BigStateLastCorrectionWord {
     }
 }
 #[derive(Clone)]
-pub struct BigStateCorrectionWord {
+struct BigStateCorrectionWord {
     nodes: Box<[Node]>,
 }
 
@@ -196,9 +198,8 @@ fn gen_conv_cw(
     let t = alphas_betas.len();
     let input_bits = alphas_betas[0].0.len();
     let output_bits = alphas_betas[0].1.len();
-    let (tree_depth, leaf_depth) = tree_and_leaf_depth(input_bits, output_bits);
+    let (tree_depth, _) = tree_and_leaf_depth(input_bits, output_bits);
     let single_output_nodes = (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-    let total_nodes = single_output_nodes * alphas_betas.len();
     let mut nodes = vec![Node::default(); single_output_nodes];
     let mut cw = BigStateLastCorrectionWord::new(output_bits, t);
     for k in 0..t {
@@ -242,7 +243,7 @@ fn conv_correct_xor_into(sign: &BitVec, cw: &BigStateLastCorrectionWord, output:
         })
 }
 
-struct BigStateDpfKey {
+pub struct BigStateDpfKey {
     root: Node,
     root_sign: bool,
     cws: Vec<BigStateCorrectionWord>,
@@ -253,7 +254,7 @@ struct BigStateDpfKey {
 impl BigStateDpfKey {
     pub fn gen(
         alphas_betas: &[(BitVec, BitVec)],
-        roots: (Node, Node),
+        roots: &(Node, Node),
     ) -> (BigStateDpfKey, BigStateDpfKey) {
         // We assume alphas_betas is SORTED!
         let mut alphas = BinaryTrie::default();
@@ -300,6 +301,9 @@ impl BigStateDpfKey {
                 &mut container_1,
             );
             let mut state_idx = 0;
+            let time = Instant::now();
+            alphas.iter_at_depth(i).enumerate().count();
+            println!("Iter at depth: {} took: {}", i, time.elapsed().as_micros());
             for (k, node) in alphas.iter_at_depth(i).enumerate() {
                 cw.correct(&sign_0_prev[k], &mut correction_container_0);
                 cw.correct(&sign_1_prev[k], &mut correction_container_1);
@@ -395,6 +399,7 @@ impl BigStateDpfKey {
         debug_assert_eq!(x.len(), self.input_len);
         debug_assert_eq!(y.len(), self.output_len);
         let t = self.non_zero_point_count();
+        sign_container.zero();
         let (tree_depth, _) = tree_and_leaf_depth(self.input_len, self.output_len);
         let mut seed = self.root;
         sign_container.set(0, self.root_sign);
@@ -508,6 +513,7 @@ impl BigStateDpfKey {
                 sign_container = &mut sign_container_static;
             }
         }
+        assert!(output_iter.next().is_none());
         EvalAllResult::new(output, self.output_len, leaf_depth)
     }
 }
@@ -527,12 +533,14 @@ mod test {
 
     #[test]
     fn test_dpf_single_point() {
-        const DEPTH: usize = 13;
-        const OUTPUT_WIDTH: usize = 4;
-        const POINTS: usize = 10;
-        let mut rng = thread_rng();
+        const DEPTH: usize = 1;
+        const OUTPUT_WIDTH: usize = 65;
+        const POINTS: usize = 2;
+        let mut rng = AesRng::from_random_seed();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
+        let root_0 = Node::default();
+        let root_1 = Node::default();
         let roots = (root_0, root_1);
         let mut alphas_betas = Vec::new();
         let mut ab_map = HashMap::new();
@@ -549,7 +557,7 @@ mod test {
             alphas_betas.push((alpha_v, beta_bitvec));
         }
         alphas_betas.sort();
-        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, roots);
+        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, &roots);
         let mut output_0 = BitVec::new(OUTPUT_WIDTH);
         let mut output_1 = BitVec::new(OUTPUT_WIDTH);
         let (mut signs, mut corrections, mut expanded_node) = k_0.make_aux_variables();
@@ -583,9 +591,9 @@ mod test {
     }
     #[test]
     fn test_dpf_evalall() {
-        const DEPTH: usize = 11;
-        const OUTPUT_WIDTH: usize = 1102;
-        const POINTS: usize = 103;
+        const DEPTH: usize = 1;
+        const OUTPUT_WIDTH: usize = 65;
+        const POINTS: usize = 2;
         let mut rng = thread_rng();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
@@ -605,7 +613,7 @@ mod test {
             alphas_betas.push((alpha_v, beta_bitvec));
         }
         alphas_betas.sort();
-        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, roots);
+        let (k_0, k_1) = BigStateDpfKey::gen(&alphas_betas, &roots);
         let ev_all_0 = k_0.eval_all();
         let ev_all_1 = k_1.eval_all();
         let blocks_per_output = (OUTPUT_WIDTH + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;

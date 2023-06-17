@@ -192,9 +192,9 @@ impl AsMut<[u8]> for Node {
     }
 }
 #[derive(Clone)]
-pub(crate) struct ExpandedNode {
-    pub nodes: Box<[Node]>,
-    pub non_zero_point_count: usize,
+pub struct ExpandedNode {
+    nodes: Box<[Node]>,
+    non_zero_point_count: usize,
 }
 impl ExpandedNode {
     pub fn new(non_zero_point_count: usize) -> Self {
@@ -280,6 +280,10 @@ impl BitVec {
         let nodes = (len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let v = vec![Node::default(); nodes].into();
         BitVec { v, len }
+    }
+    pub fn fill_random(&mut self, mut rng: impl RngCore + CryptoRng) {
+        self.v.iter_mut().for_each(|v| v.fill(&mut rng));
+        self.normalize();
     }
     pub fn zero(&mut self) {
         self.v.iter_mut().for_each(|v| {
@@ -498,7 +502,9 @@ pub(crate) fn convert_into(node: &Node, output: &mut [Node]) {
     }
 }
 impl DpfKey {
-    pub fn gen(roots: (Node, Node), alpha: BitVec, beta: BitVec) -> (DpfKey, DpfKey) {
+    pub fn gen(roots: &(Node, Node), alpha: &BitVec, beta: &BitVec) -> (DpfKey, DpfKey) {
+        // let alpha = alpha.clone();
+        // let beta = beta.clone();
         let nodes_num = (beta.len() + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let mut nodes = vec![Node::default(); nodes_num];
         let mut t_0 = false;
@@ -748,7 +754,7 @@ mod tests {
         let alpha_v = BitVec::from(&alpha[..]);
         let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
         let beta_bitvec = BitVec::from(&beta[..]);
-        let (k_0, k_1) = DpfKey::gen(roots, alpha_v, (&beta[..]).into());
+        let (k_0, k_1) = DpfKey::gen(&roots, &alpha_v, &beta_bitvec);
         let mut output_0 = BitVec::new(OUTPUT_WIDTH);
         let mut output_1 = BitVec::new(OUTPUT_WIDTH);
         for i in 0usize..1 << DEPTH {
@@ -781,7 +787,7 @@ mod tests {
         let alpha_v = BitVec::from(&alpha[..]);
         let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
         let beta_bitvec = BitVec::from(&beta[..]);
-        let (k_0, k_1) = DpfKey::gen(roots, alpha_v, (&beta[..]).into());
+        let (k_0, k_1) = DpfKey::gen(&roots, &alpha_v, &beta_bitvec);
         let ev_all_0 = k_0.eval_all();
         let ev_all_1 = k_1.eval_all();
         let mut output_0 = vec![Node::default(); ev_all_0.blocks_per_output];
