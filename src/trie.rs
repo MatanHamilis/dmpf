@@ -4,11 +4,13 @@ use crate::dpf::BitVec;
 
 pub struct BinaryTrie {
     root: Rc<RefCell<TrieNode>>,
+    len: usize,
 }
 impl Default for BinaryTrie {
     fn default() -> Self {
         BinaryTrie {
             root: Rc::new(RefCell::new(TrieNode::default())),
+            len: 0,
         }
     }
 }
@@ -61,9 +63,13 @@ impl BinaryTrie {
             cur_node = new_node;
         }
         cur_node.borrow_mut().set_terminal(true);
+        self.len += 1;
     }
     pub fn iter_at_depth(&self, depth: usize) -> BinaryTrieDepthIter {
         BinaryTrieDepthIter::new(self, depth)
+    }
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
 pub struct BinaryTrieDepthIter<'a> {

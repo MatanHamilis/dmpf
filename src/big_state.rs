@@ -1,15 +1,11 @@
-use std::iter::Inspect;
 use std::ops::BitXorAssign;
 use std::time::Instant;
 
-use aes::cipher::typenum::Exp;
 use aes_prng::AesRng;
 
 use crate::dpf::convert_into;
-use crate::dpf::many_prg;
 use crate::dpf::tree_and_leaf_depth;
 use crate::dpf::BitVec;
-use crate::dpf::CorrectionWord;
 use crate::dpf::EvalAllResult;
 use crate::dpf::ExpandedNode;
 use crate::dpf::Node;
@@ -50,12 +46,6 @@ struct BigStateCorrectionWord {
 }
 
 impl BigStateCorrectionWord {
-    pub fn new(t: usize) -> Self {
-        let node_count = t * Self::single_node_count(t);
-        Self {
-            nodes: Box::from(vec![Node::default(); node_count]),
-        }
-    }
     pub fn single_node_count(t: usize) -> usize {
         1 + 2 * ((t + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY)
     }
@@ -78,18 +68,6 @@ impl BigStateCorrectionWord {
         let bit_index = index & (BITS_OF_SECURITY - 1);
         (entry, bit_index)
     }
-    pub fn set_bit(
-        &mut self,
-        bit_value: bool,
-        entry_idx: usize,
-        bit_index: usize,
-        direction: bool,
-        t: usize,
-    ) {
-        let entry = self.get_entry_mut(entry_idx, t);
-        let (cell, bit_index) = Self::bit_coords(bit_index, direction, t);
-        entry[cell].set_bit(bit_index, bit_value)
-    }
     pub fn set_bits_from(&mut self, entry_idx: usize, t: usize, bits: &[Node]) {
         let entry = self.get_entry_mut(entry_idx, t);
         entry[1..].copy_from_slice(bits);
@@ -107,17 +85,6 @@ impl BigStateCorrectionWord {
         let entry = self.get_entry_mut(entry_idx, t);
         let (cell, bit_index) = Self::bit_coords(bit_index, direction, t);
         entry[cell].toggle_bit(bit_index);
-    }
-    pub fn get_bit(
-        &mut self,
-        entry_idx: usize,
-        bit_index: usize,
-        direction: bool,
-        t: usize,
-    ) -> bool {
-        let entry = self.get_entry_mut(entry_idx, t);
-        let (cell, bit_index) = Self::bit_coords(bit_index, direction, t);
-        entry[cell].get_bit(bit_index)
     }
     pub fn get_bits(entry: &[Node], direction: bool, t: usize) -> &[Node] {
         let (first_cell, _) = Self::bit_coords(0, direction, t);
@@ -277,7 +244,7 @@ impl BigStateDpfKey {
         sign_1_a[0].set(0, true);
         let mut container_0 = ExpandedNode::new(t);
         let mut container_1 = ExpandedNode::new(t);
-        let (tree_depth, leaf_depth) = tree_and_leaf_depth(input_bits, output_bits);
+        let (tree_depth, _) = tree_and_leaf_depth(input_bits, output_bits);
         let mut correction_container_0 =
             vec![Node::default(); BigStateCorrectionWord::single_node_count(t)];
         let mut correction_container_1 =
@@ -444,7 +411,6 @@ impl BigStateDpfKey {
         let t = self.non_zero_point_count();
         let nodes_per_item = (self.output_len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_len, self.output_len);
-        let items_per_node = 1 << leaf_depth;
         let total_nodes = (1 << tree_depth) * nodes_per_item;
         let mut output = Vec::with_capacity(total_nodes);
         unsafe { output.set_len(total_nodes) };
@@ -537,8 +503,6 @@ mod test {
         const OUTPUT_WIDTH: usize = 65;
         const POINTS: usize = 2;
         let mut rng = AesRng::from_random_seed();
-        let root_0 = Node::random(&mut rng);
-        let root_1 = Node::random(&mut rng);
         let root_0 = Node::default();
         let root_1 = Node::default();
         let roots = (root_0, root_1);

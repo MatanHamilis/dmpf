@@ -1,87 +1,37 @@
-use once_cell::sync::Lazy;
-use std::cmp::Ordering;
-use std::ops::BitXorAssign;
-
-use crate::xor_arrays;
-
 use super::BITS_OF_SECURITY;
 use super::BYTES_OF_SECURITY;
-use aes::{
-    cipher::{BlockEncrypt, KeyInit},
-    Aes128, Block,
-};
+use crate::prg::many_prg;
 use rand::{CryptoRng, RngCore};
-const DPF_AES_KEY: [u8; BYTES_OF_SECURITY] =
-    [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2];
-static AES: Lazy<Aes128> = Lazy::new(|| Aes128::new_from_slice(&DPF_AES_KEY).unwrap());
+use std::cmp::Ordering;
+use std::ops::{BitXor, BitXorAssign};
 
-pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
-    let mut blocks = [Block::from(*input.as_ref()); 2];
-    blocks[0][0] ^= children[0];
-    blocks[1][0] ^= children[1];
-    AES.encrypt_blocks(&mut blocks);
-    xor_arrays(&mut blocks[0].into(), input.as_ref());
-    xor_arrays(&mut blocks[1].into(), input.as_ref());
-    blocks[0][0] ^= children[0];
-    blocks[1][0] ^= children[1];
-    unsafe { std::mem::transmute(blocks) }
-}
-pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
-    let mut blocks = [Block::from(*input.as_ref()); 3];
-    blocks[0][0] ^= children[0];
-    blocks[1][0] ^= children[1];
-    blocks[2][0] ^= children[2];
-    AES.encrypt_blocks(&mut blocks);
-    xor_arrays(&mut blocks[0].into(), input.as_ref());
-    xor_arrays(&mut blocks[1].into(), input.as_ref());
-    xor_arrays(&mut blocks[2].into(), input.as_ref());
-    blocks[0][0] ^= children[0];
-    blocks[1][0] ^= children[1];
-    blocks[2][0] ^= children[2];
-    unsafe { std::mem::transmute(blocks) }
-}
-pub fn many_prg(
-    input: &Node,
-    mut children: impl Iterator<Item = u16> + Clone,
-    output: &mut [Node],
-) {
-    let input_block = Block::from(*input.as_ref());
-    if output.len() > 256 {
-        unimplemented!()
-    }
-    let mut blocks_output =
-        unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr() as *mut Block, output.len()) };
-    let children_copy = children.clone();
-    blocks_output
-        .iter_mut()
-        .zip(children_copy)
-        .for_each(|(mut v, child)| {
-            *v = input_block;
-            let bytes = child.to_be_bytes();
-            v[0] ^= bytes[0];
-            v[1] ^= bytes[1];
-        });
-    AES.encrypt_blocks(&mut blocks_output);
-    blocks_output
-        .iter_mut()
-        .zip(children)
-        .for_each(|(mut v, child)| {
-            let bytes = child.to_be_bytes();
-            v[0] ^= bytes[0];
-            v[1] ^= bytes[1];
-        });
-}
-
-pub struct NodeBitStructs<'a> {
-    node: &'a mut Node,
-    bit_width: usize,
-}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, Hash)]
-pub struct Node([u64; BYTES_OF_SECURITY / 8]);
+pub struct Node(u128);
+impl From<u128> for Node {
+    fn from(value: u128) -> Self {
+        Self(value)
+    }
+}
+impl From<Node> for u128 {
+    fn from(value: Node) -> Self {
+        value.0
+    }
+}
+
 impl Node {
     pub fn zero(&mut self) {
-        self.0[0] = 0;
-        self.0[1] = 0;
+        self.0 = 0;
+    }
+    pub fn pop_first_two_bits(&mut self) -> (bool, bool) {
+        let (v, output) = self.0.overflowing_shr(1);
+        let (v, output_2) = v.overflowing_shr(1);
+        self.0 = v;
+        (output, output_2)
+    }
+    pub fn push_first_two_bits(&mut self, bit_1: bool, bit_2: bool) {
+        let first = bit_1 as u128;
+        let second = (bit_2 as u128) << 1;
+        self.0 = (self.0 << 2) ^ first ^ second;
     }
     pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
         let mut output = Node::default();
@@ -92,50 +42,27 @@ impl Node {
         let ptr = self.as_mut();
         rng.fill_bytes(ptr);
     }
-    fn coordinates(index: usize) -> (usize, usize) {
-        (
-            index / u64::BITS as usize,
-            63 - (index & (u64::BITS as usize - 1)),
-        )
+    pub fn shl(&mut self, amount: u32) {
+        self.0 = self.0.overflowing_shl(amount).0;
     }
-    pub fn shl(&mut self, mut amount: u32) {
-        if amount >= 64 {
-            self.0[0] = self.0[1];
-            self.0[1] = 0;
-            amount -= 64;
-        }
-        if amount == 0 {
-            return;
-        }
-        self.0[0] = self.0[0].overflowing_shl(amount).0;
-        self.0[0] |= self.0[1].overflowing_shr(64 - amount).0;
-        self.0[1] = self.0[1].overflowing_shl(amount).0;
-    }
-    pub fn shr(&mut self, mut amount: u32) {
-        if amount >= 64 {
-            self.0[1] = self.0[0];
-            self.0[0] = 0;
-            amount -= 64;
-        }
-        if amount == 0 {
-            return;
-        }
-        self.0[1] = self.0[1].overflowing_shr(amount).0;
-        self.0[1] |= self.0[0].overflowing_shl(64 - amount).0;
-        self.0[0] = self.0[0].overflowing_shr(amount).0;
+    pub fn shr(&mut self, amount: u32) {
+        self.0 = self.0.overflowing_shr(amount).0;
     }
     pub fn get_bit(&self, index: usize) -> bool {
-        let (cell, bit) = Self::coordinates(index);
-        self.0[cell] >> bit & 1 == 1
+        let index = 127 - index;
+        self.0 >> index & 1 == 1
     }
+
     pub fn set_bit(&mut self, index: usize, value: bool) {
-        let (cell, bit) = Self::coordinates(index);
-        let mask: u64 = !(1 << bit);
-        self.0[cell] = (self.0[cell] & mask) ^ ((value as u64) << bit)
+        // let (cell, bit) = Self::coordinates(index);
+        let index = 127 - index;
+        let mask: u128 = !(1 << index);
+        self.0 = (self.0 & mask) ^ ((value as u128) << index)
     }
     pub fn toggle_bit(&mut self, index: usize) {
-        let (cell, bit) = Self::coordinates(index);
-        self.0[cell] ^= 1 << bit;
+        // let (cell, bit) = Self::coordinates(index);
+        let index = 127 - index;
+        self.0 ^= 1 << index;
     }
     pub fn mask(&mut self, bits: usize) {
         self.shr((BITS_OF_SECURITY - bits) as u32);
@@ -145,63 +72,59 @@ impl Node {
         if i >= BITS_OF_SECURITY {
             return self.cmp(other);
         }
-        let first_cell_bits = std::cmp::min(64, i);
-        let self_first = self.0[0] >> (64 - first_cell_bits);
-        let other_first = other.0[0] >> (64 - first_cell_bits);
-        match self_first.cmp(&other_first) {
-            Ordering::Equal => {}
-            result @ _ => return result,
-        }
-        let second_cell_bits = i - first_cell_bits;
-        let self_first = self.0[0] >> (64 - second_cell_bits);
-        let other_first = other.0[0] >> (64 - second_cell_bits);
+        let mask = (1 << i) - 1;
+        let self_first = self.0 & mask;
+        let other_first = other.0 & mask;
         self_first.cmp(&other_first)
     }
 }
 impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        for i in 0..self.0.len() {
-            match self.0[i].cmp(&other.0[i]) {
-                Ordering::Equal => continue,
-                result @ _ => return Some(result),
-            }
-        }
-        Some(Ordering::Equal)
+        self.0.partial_cmp(&other.0)
     }
 }
 impl Default for Node {
     fn default() -> Self {
-        Self([0u64; BYTES_OF_SECURITY / 8])
+        Self(0u128)
+    }
+}
+
+impl BitXor<&Node> for &Node {
+    type Output = Node;
+    fn bitxor(self, rhs: &Node) -> Self::Output {
+        Node(self.0 ^ rhs.0)
     }
 }
 impl BitXorAssign<&Node> for Node {
     fn bitxor_assign(&mut self, rhs: &Node) {
-        for i in 0..self.0.len() {
-            self.0[i] ^= rhs.0[i];
-        }
+        self.0 ^= rhs.0;
     }
 }
 impl AsRef<[u8; 16]> for Node {
     fn as_ref(&self) -> &[u8; 16] {
-        unsafe { (self.0.as_ptr() as *const [u8; 16]).as_ref().unwrap() }
+        unsafe {
+            (&self.0 as *const u128 as *const [u8; 16])
+                .as_ref()
+                .unwrap()
+        }
     }
 }
 impl AsMut<[u8]> for Node {
     fn as_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.0.as_mut_ptr() as *mut u8, BYTES_OF_SECURITY) }
+        unsafe {
+            std::slice::from_raw_parts_mut(&mut self.0 as *mut u128 as *mut u8, BYTES_OF_SECURITY)
+        }
     }
 }
 #[derive(Clone)]
 pub struct ExpandedNode {
     nodes: Box<[Node]>,
-    non_zero_point_count: usize,
 }
 impl ExpandedNode {
     pub fn new(non_zero_point_count: usize) -> Self {
         let node_count = 2 + 2 * ((non_zero_point_count + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY);
         ExpandedNode {
             nodes: Box::from(vec![Node::default(); node_count]),
-            non_zero_point_count,
         }
     }
     pub fn fill_all(&mut self, node: &Node) {
@@ -287,8 +210,7 @@ impl BitVec {
     }
     pub fn zero(&mut self) {
         self.v.iter_mut().for_each(|v| {
-            v.0[0] = 0;
-            v.0[1] = 0;
+            v.0 = 0;
         });
     }
     pub fn len(&self) -> usize {
@@ -342,65 +264,7 @@ impl<'a> BitSlice<'a> {
     pub fn len(&self) -> usize {
         self.len
     }
-    fn coordinates(index: usize) -> (usize, usize) {
-        (index / BITS_OF_SECURITY, index & (BITS_OF_SECURITY - 1))
-    }
-    pub fn get(&self, index: usize) -> bool {
-        let (cell, idx) = Self::coordinates(index);
-        self.v[cell].get_bit(idx)
-    }
-    fn shrink(&mut self, new_len: usize) {
-        assert!(new_len <= self.len);
-        self.len = new_len;
-    }
 }
-
-// #[derive(Debug, PartialEq, Eq)]
-// pub struct BitSliceMut<'a> {
-//     v: &'a mut [Node],
-//     len: usize,
-// }
-// impl<'a> AsMut<[Node]> for BitSliceMut<'a> {
-//     fn as_mut(&mut self) -> &mut [Node] {
-//         &mut self.v
-//     }
-// }
-// impl<'a> BitSliceMut<'a> {
-//     pub fn new(len: usize, v: &'a mut [Node]) -> Self {
-//         BitSliceMut { v, len }
-//     }
-//     pub fn len(&self) -> usize {
-//         self.len
-//     }
-//     fn coordinates(index: usize) -> (usize, usize) {
-//         (index / BITS_OF_SECURITY, index & (BITS_OF_SECURITY - 1))
-//     }
-//     pub fn get(&self, index: usize) -> bool {
-//         let (cell, idx) = Self::coordinates(index);
-//         self.v[cell].get_bit(idx)
-//     }
-//     pub fn set(&mut self, index: usize, val: bool) {
-//         let (cell, idx) = Self::coordinates(index);
-//         self.v[cell].set_bit(idx, val);
-//     }
-//     pub fn fill(&mut self, nodes: &[Node]) {
-//         self.v.copy_from_slice(nodes);
-//         self.normalize();
-//     }
-//     pub(crate) fn normalize(&mut self) {
-//         let bits_to_leave = self.len & (BITS_OF_SECURITY - 1);
-//         let bits_to_leave = ((bits_to_leave + BITS_OF_SECURITY - 1) % BITS_OF_SECURITY) + 1;
-//         self.v.last_mut().unwrap().mask(bits_to_leave);
-//     }
-// }
-// impl<'a> From<&'a mut BitVec> for BitSliceMut<'a> {
-//     fn from(value: &'a mut BitVec) -> Self {
-//         Self {
-//             v: &mut value.v,
-//             len: value.len,
-//         }
-//     }
-// }
 
 impl From<&[bool]> for BitVec {
     fn from(v: &[bool]) -> Self {
@@ -438,15 +302,7 @@ impl BitXorAssign<&BitVec> for BitVec {
         }
     }
 }
-// impl<'a> BitXorAssign<&BitVec> for BitSliceMut<'a> {
-//     fn bitxor_assign(&mut self, rhs: &BitVec) {
-//         assert_eq!(self.len, rhs.len);
-//         let bytes = (self.len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-//         for i in 0..bytes {
-//             self.v[i].bitxor_assign(&rhs.v[i]);
-//         }
-//     }
-// }
+
 #[derive(Clone, Copy)]
 pub struct CorrectionWord {
     node: Node,
@@ -503,10 +359,6 @@ pub(crate) fn convert_into(node: &Node, output: &mut [Node]) {
 }
 impl DpfKey {
     pub fn gen(roots: &(Node, Node), alpha: &BitVec, beta: &BitVec) -> (DpfKey, DpfKey) {
-        // let alpha = alpha.clone();
-        // let beta = beta.clone();
-        let nodes_num = (beta.len() + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-        let mut nodes = vec![Node::default(); nodes_num];
         let mut t_0 = false;
         let mut t_1 = true;
         let mut expanded_node_0 = ExpandedNode::new(1);
@@ -599,11 +451,6 @@ impl DpfKey {
             let (new_t, t_corr) = (ex_node.get_bit(0, path_bit), cw.get_bit(path_bit));
             t = new_t ^ (t & t_corr);
         }
-        // let mut output_node = Node::default();
-        // let mut bs = BitSliceMut::new(
-        //     self.output_bits << levels_packed,
-        //     std::slice::from_mut(&mut output_node),
-        // );
         if x.len() > self.cws.len() {
             let levels_packed = x.len() - self.cws.len();
             let mut bs = BitVec::new(self.output_bits << levels_packed);
@@ -631,13 +478,11 @@ impl DpfKey {
         }
     }
     pub fn eval_all(&self) -> EvalAllResult {
-        const BATCH_SIZE: usize = 1;
         let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_bits, self.output_bits);
         let blocks_per_output = (self.output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
         let total_items = 1 << (self.input_bits - leaf_depth);
         let mut output_vec = Vec::with_capacity(total_items);
         let mut output_container = BitVec::new(self.output_bits << leaf_depth);
-        let mut container = vec![Node::default(); BATCH_SIZE * 3];
         let mut t = self.root_bit;
         let mut s = self.root;
         let mut expanded_node = ExpandedNode::new(1);
@@ -737,7 +582,7 @@ mod tests {
     use aes_prng::AesRng;
     use rand::{thread_rng, RngCore};
 
-    use crate::dpf::{int_to_bits, tree_and_leaf_depth, BitVec};
+    use crate::dpf::{int_to_bits, BitVec};
 
     use super::{DpfKey, Node};
 
