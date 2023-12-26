@@ -226,7 +226,7 @@ impl BigStateDpfKey {
         // We assume alphas_betas is SORTED!
         let mut alphas = BinaryTrie::default();
         for (alpha, _) in alphas_betas {
-            alphas.insert(alpha);
+            alphas.insert(&alpha.into());
         }
         let t = alphas_betas.len();
         let input_bits = alphas_betas[0].0.len();

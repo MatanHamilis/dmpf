@@ -164,6 +164,7 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
     ((100_000 * lambda + 100 * b) / a).div_ceil(64)
 }
 
+#[derive(Clone)]
 pub struct EncodedOkvs<const W: usize>(Vec<V>);
 impl<const W: usize> EncodedOkvs<W> {
     pub fn decode(&self, key: K) -> V {
@@ -210,7 +211,9 @@ pub fn hash_key<const W: usize>(k: K, m: usize) -> (usize, [u64; W]) {
 }
 pub fn encode<const W: usize>(kvs: &[(K, V)], epsilon_percent: EpsilonPercent) -> EncodedOkvs<W> {
     let epsilon_percent_usize = usize::from(epsilon_percent);
-    let m = ((100 + epsilon_percent_usize) * kvs.len()).div_ceil(100);
+    let m = ((100 + epsilon_percent_usize) * kvs.len())
+        .div_ceil(100)
+        .max(W * 64 + 1);
     let mut matrix: Vec<_> = kvs
         .iter()
         .copied()

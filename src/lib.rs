@@ -6,7 +6,7 @@ mod dpf;
 mod prg;
 mod trie;
 pub use dpf::int_to_bits;
-// pub mod okvs;
+pub mod okvs;
 
 pub use dpf::BitVec;
 pub use dpf::DpfKey;
@@ -30,9 +30,25 @@ pub trait Dmpf
 where
     Self: Sized,
 {
+    type Key: DmpfKey;
+    fn try_gen<R: CryptoRng + RngCore>(
+        &self,
+        inputs: &[(
+            <Self::Key as DmpfKey>::InputContainer,
+            <Self::Key as DmpfKey>::OutputContainer,
+        )],
+        rng: &mut R,
+    ) -> Option<(Self::Key, Self::Key)>;
+}
+
+pub trait DmpfKey
+where
+    Self: Sized,
+{
     type Session;
-    fn try_gen<R: CryptoRng + RngCore>(inputs: &[(BitVec, BitVec)], rng: &mut R) -> Option<Self>;
+    type InputContainer;
+    type OutputContainer;
     fn make_session(&self) -> Self;
-    fn eval(&self, input: BitVec) -> BitVec;
+    fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer);
     fn eval_all(&self) -> Box<[BitVec]>;
 }

@@ -1,6 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::dpf::BitVec;
+use aes::cipher::typenum::Bit;
+
+use crate::{
+    dpf::{BitSlice, BitVec},
+    BITS_OF_SECURITY,
+};
 
 pub struct BinaryTrie {
     root: Rc<RefCell<TrieNode>>,
@@ -50,7 +55,10 @@ impl Default for TrieNode {
     }
 }
 impl BinaryTrie {
-    pub fn insert(&mut self, str: &BitVec) {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn insert(&mut self, str: &BitSlice) {
         let mut cur_node = self.root.clone();
         for i in 0..str.len() {
             let bit = str.get(i);
@@ -68,12 +76,10 @@ impl BinaryTrie {
     pub fn iter_at_depth(&self, depth: usize) -> BinaryTrieDepthIter {
         BinaryTrieDepthIter::new(self, depth)
     }
-    pub fn len(&self) -> usize {
-        self.len
-    }
 }
 pub struct BinaryTrieDepthIter<'a> {
     trie: &'a BinaryTrie,
+    string: BitVec,
     depth: usize,
     cur_depth: usize,
     prev_item: Option<Rc<RefCell<TrieNode>>>,
@@ -83,6 +89,7 @@ impl<'a> BinaryTrieDepthIter<'a> {
     pub fn new(trie: &'a BinaryTrie, depth: usize) -> Self {
         Self {
             trie,
+            string: BitVec::new(depth.max(1)),
             depth: depth + 1,
             cur_depth: 1,
             prev_item: None,
@@ -98,11 +105,13 @@ impl<'a> BinaryTrieDepthIter<'a> {
         self.prev_item = self.cur_item.clone();
         if cur_item.borrow().parent == prev_item {
             let next_son = match cur_item.borrow().get_son(false) {
-                n @ Some(_) => n,
-                None => cur_item.borrow().get_son(true),
+                Some(v) => Some((v, false)),
+                None => cur_item.borrow().get_son(true).map(|v| (v, true)),
             };
             if next_son.is_some() && self.depth > self.cur_depth {
-                self.cur_item = next_son;
+                let (next_son, direction) = next_son.unwrap();
+                self.cur_item = Some(next_son);
+                self.string.set(self.cur_depth - 1, direction);
                 self.cur_depth += 1;
                 return;
             }
@@ -112,6 +121,7 @@ impl<'a> BinaryTrieDepthIter<'a> {
             let right_son = cur_item.borrow().get_son(true);
             if right_son.is_some() && self.depth > self.cur_depth {
                 self.cur_item = right_son;
+                self.string.set(self.cur_depth - 1, true);
                 self.cur_depth += 1;
             } else {
                 self.cur_item = cur_item.borrow().get_parent();
@@ -121,6 +131,21 @@ impl<'a> BinaryTrieDepthIter<'a> {
             self.cur_item = cur_item.borrow().get_parent();
             self.cur_depth -= 1;
         }
+    }
+    pub fn obtain_string(&self, output: &mut BitVec) {
+        let num_cells = self.depth.div_ceil(BITS_OF_SECURITY);
+        let last_cell_bits = self.depth & (BITS_OF_SECURITY - 1);
+        self.string
+            .as_ref()
+            .iter()
+            .zip(output.as_mut().iter_mut())
+            .take(num_cells)
+            .for_each(|(src, dst)| *dst = *src);
+        output
+            .as_mut()
+            .get_mut(num_cells - 1)
+            .iter_mut()
+            .for_each(|v| v.mask(last_cell_bits));
     }
 }
 impl<'a> Iterator for BinaryTrieDepthIter<'a> {
@@ -149,9 +174,9 @@ mod test {
     fn trie_test() {
         let mut trie = BinaryTrie::default();
         let mut string = BitVec::new(1);
-        trie.insert(&string);
+        trie.insert(&(&string).into());
         string.set(0, true);
-        trie.insert(&string);
+        trie.insert(&(&string).into());
         for i in 0..1 {
             let t = trie.iter_at_depth(i);
             assert_eq!(t.count(), 1);

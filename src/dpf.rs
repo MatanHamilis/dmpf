@@ -23,15 +23,18 @@ impl Node {
         self.0 = 0;
     }
     pub fn pop_first_two_bits(&mut self) -> (bool, bool) {
-        let (v, output) = self.0.overflowing_shr(1);
-        let (v, output_2) = v.overflowing_shr(1);
-        self.0 = v;
+        let output = self.0 & 1 == 1;
+        let output_2 = self.0 & 2 == 2;
+        self.0 &= !3u128;
+        // let v = self.0.overflowing_shr(1).0;
+        // let v = v.overflowing_shr(1).0;
+        // self.0 = v;
         (output, output_2)
     }
     pub fn push_first_two_bits(&mut self, bit_1: bool, bit_2: bool) {
         let first = bit_1 as u128;
         let second = (bit_2 as u128) << 1;
-        self.0 = (self.0 << 2) ^ first ^ second;
+        self.0 = (self.0) ^ first ^ second;
     }
     pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
         let mut output = Node::default();
@@ -65,8 +68,8 @@ impl Node {
         self.0 ^= 1 << index;
     }
     pub fn mask(&mut self, bits: usize) {
-        self.shr((BITS_OF_SECURITY - bits) as u32);
-        self.shl((BITS_OF_SECURITY - bits) as u32);
+        let mask = ((1u128 << bits) - 1) << ((BITS_OF_SECURITY - bits) & (BITS_OF_SECURITY - 1));
+        self.0 &= mask;
     }
     pub fn cmp_first_bits(&self, other: &Self, i: usize) -> Ordering {
         if i >= BITS_OF_SECURITY {
@@ -164,7 +167,7 @@ impl ExpandedNode {
         &self.nodes[node..node + direction_len]
     }
 }
-#[derive(Clone, PartialEq, Eq, Debug, Hash, Ord)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash, PartialOrd)]
 pub struct BitVec {
     v: Box<[Node]>,
     len: usize,
@@ -179,18 +182,16 @@ impl AsMut<[Node]> for BitVec {
         &mut self.v
     }
 }
-impl PartialOrd for BitVec {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.len() != other.len() {
-            return None;
-        }
-        for (self_node, node) in self.v.iter().zip(other.v.iter()) {
-            match self_node.cmp(node) {
+// Lexicographic ordering
+impl Ord for BitVec {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for (me_cell, other_cell) in self.v.iter().zip(other.v.iter()) {
+            match me_cell.cmp(other_cell) {
                 Ordering::Equal => continue,
-                result @ _ => return Some(result),
+                n @ _ => return n,
             }
         }
-        Some(Ordering::Equal)
+        return self.len.cmp(&other.len);
     }
 }
 
@@ -235,7 +236,7 @@ impl BitVec {
 }
 impl<'a> From<&'a BitVec> for BitSlice<'a> {
     fn from(value: &'a BitVec) -> Self {
-        Self::new(value.len(), value.as_ref())
+        Self::new(value.len(), &value.as_ref())
     }
 }
 impl<'a> PartialOrd for BitSlice<'a> {
@@ -259,10 +260,14 @@ pub struct BitSlice<'a> {
 }
 impl<'a> BitSlice<'a> {
     pub fn new(len: usize, v: &'a [Node]) -> Self {
-        BitSlice { v, len }
+        BitSlice { v: v.as_ref(), len }
     }
     pub fn len(&self) -> usize {
         self.len
+    }
+    pub fn get(&self, index: usize) -> bool {
+        let (cell, idx) = BitVec::coordinates(index);
+        self.v[cell].get_bit(idx)
     }
 }
 
