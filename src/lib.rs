@@ -50,5 +50,5 @@ where
     type OutputContainer;
     fn make_session(&self) -> Self;
     fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer);
-    fn eval_all(&self) -> Box<[BitVec]>;
+    fn eval_all(&self) -> Box<[Self::OutputContainer]>;
 }

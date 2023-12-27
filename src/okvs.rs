@@ -1,5 +1,3 @@
-use std::ops::Shl;
-
 use rand::{CryptoRng, RngCore};
 use rb_okvs::{EncodedOkvs, EpsilonPercent};
 
@@ -7,11 +5,24 @@ use crate::{
     dpf::BitSlice, prg::double_prg, trie::BinaryTrie, BitVec, Dmpf, DmpfKey, Node, BITS_OF_SECURITY,
 };
 
+#[derive(Clone)]
+pub enum Okvs<const W: usize> {
+    InformationTheoretic(InformationTheoreticOkvs),
+    RbOkvs(EncodedOkvs<W>),
+}
+impl<const W: usize> Okvs<W> {
+    fn decode(&self, key: u128) -> u128 {
+        match self {
+            Okvs::RbOkvs(v) => v.decode(key),
+            Okvs::InformationTheoretic(v) => v.decode(key as usize),
+        }
+    }
+}
 pub struct OkvsDmpfKey<const W: usize> {
     seed: Node,
     sign: bool,
     output_len: usize,
-    cws: Vec<EncodedOkvs<W>>,
+    cws: Vec<Okvs<W>>,
 }
 impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
     type Session = ();
@@ -46,8 +57,18 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
         node_output.mask(self.output_len);
         *output = node_output.into();
     }
-    fn eval_all(&self) -> Box<[crate::BitVec]> {
-        unimplemented!()
+    fn eval_all(&self) -> Box<[Self::OutputContainer]> {
+        unimplemented!();
+        // let input_length = self.cws.len() - 1;
+        // let mut sign = vec![self.sign];
+        // let mut seed = vec![self.seed];
+        // for i in 0..input_length {
+        //     let mut next_sign = Vec::with_capacity(1 << (i + 1));
+        //     let mut next_seed = Vec::with_capacity(1 << (i + 1));
+        //     for k in 0..1 << i {
+        //         let current_node = (k as u128) << (BITS_OF_SECURITY - i);
+        //     }
+        // }
     }
     fn make_session(&self) -> Self {
         unimplemented!()
@@ -191,7 +212,7 @@ impl<const W: usize> Dmpf for OkvsDmpf<W> {
             &signs_1,
             self.epsilon_percent,
         );
-        cws.push(last_cw);
+        cws.push(Okvs::RbOkvs(last_cw));
         let first_key = OkvsDmpfKey::<W> {
             seed: seed_0,
             sign: sign_0,
@@ -218,13 +239,13 @@ impl<const W: usize> OkvsDmpf<W> {
         });
         output
     }
-    fn correct(v: Node, sign: bool, cw: &EncodedOkvs<W>) -> Node {
+    fn correct(v: Node, sign: bool, cw: &Okvs<W>) -> Node {
         if !sign {
             return 0u128.into();
         }
         cw.decode(v.into()).into()
     }
-    fn conv_correct(v: Node, sign: bool, cw: &EncodedOkvs<W>) -> Node {
+    fn conv_correct(v: Node, sign: bool, cw: &Okvs<W>) -> Node {
         if sign {
             Node::default()
         } else {
@@ -256,7 +277,7 @@ impl<const W: usize> OkvsDmpf<W> {
         sign_1: &[bool],
         epsilon_percent: EpsilonPercent,
         rng: &mut R,
-    ) -> EncodedOkvs<W> {
+    ) -> Okvs<W> {
         if depth >= BITS_OF_SECURITY {
             unimplemented!();
         }
@@ -329,7 +350,15 @@ impl<const W: usize> OkvsDmpf<W> {
             candidate = candidate.overflowing_add(step).0;
         }
         dbg!(&v);
-        rb_okvs::encode::<W>(&v, epsilon_percent)
+        // In this case we go for information theoretic OKVS
+        if points_trie.len() >= (1 << depth) {
+            Okvs::InformationTheoretic(InformationTheoreticOkvs::encode(
+                depth,
+                v.into_iter().map(|v| v.1).collect(),
+            ))
+        } else {
+            Okvs::RbOkvs(rb_okvs::encode::<W>(&v, epsilon_percent))
+        }
     }
 }
 
@@ -351,13 +380,26 @@ fn random_u128<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
 fn random_u126<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
     random_u128(rng) & (!3u128)
 }
+#[derive(Clone)]
+pub struct InformationTheoreticOkvs(Box<[u128]>, usize);
+impl InformationTheoreticOkvs {
+    fn encode(mut input_length_in_bits: usize, values: Box<[u128]>) -> Self {
+        assert_eq!(values.len(), 1 << input_length_in_bits);
+        if input_length_in_bits == 0 {
+            input_length_in_bits = 64;
+        }
+        Self(values, input_length_in_bits)
+    }
+    fn decode(&self, i: usize) -> u128 {
+        self.0[i >> (64 - self.1)]
+    }
+}
 
 #[cfg(test)]
 mod test {
-    use core::panic;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
-    use rand::{random, thread_rng};
+    use rand::thread_rng;
 
     use crate::{okvs::random_u128, Dmpf, DmpfKey};
 
