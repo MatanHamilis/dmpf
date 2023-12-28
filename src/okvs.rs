@@ -1,3 +1,4 @@
+use aes::cipher::typenum::bit;
 use rand::{CryptoRng, RngCore};
 use rb_okvs::{EncodedOkvs, EpsilonPercent};
 
@@ -39,12 +40,12 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
             v.mask(i);
             println!("\tQuerying v: {v:?}");
             let mut correction_seed = OkvsDmpf::correct(v, sign, &self.cws[i]);
-            let input_bit = input_node.get_bit(i);
-            let input_bit_usize = input_bit as usize;
             let (correction_sign_left, correction_sign_right) =
                 correction_seed.pop_first_two_bits();
-            let signs = [correction_sign_left, correction_sign_right];
             let seeds = double_prg(&seed, &DOUBLE_PRG_CHILDREN);
+            let signs = [correction_sign_left, correction_sign_right];
+            let input_bit = input_node.get_bit(i);
+            let input_bit_usize = input_bit as usize;
             let mut seed_prg = seeds[input_bit_usize];
             let (sign_prg, _) = seed_prg.pop_first_two_bits();
             println!("SEED PRG: {seed_prg:?}");
@@ -58,17 +59,49 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
         *output = node_output.into();
     }
     fn eval_all(&self) -> Box<[Self::OutputContainer]> {
-        unimplemented!();
-        // let input_length = self.cws.len() - 1;
-        // let mut sign = vec![self.sign];
-        // let mut seed = vec![self.seed];
-        // for i in 0..input_length {
-        //     let mut next_sign = Vec::with_capacity(1 << (i + 1));
-        //     let mut next_seed = Vec::with_capacity(1 << (i + 1));
-        //     for k in 0..1 << i {
-        //         let current_node = (k as u128) << (BITS_OF_SECURITY - i);
-        //     }
-        // }
+        let input_length = self.cws.len() - 1;
+        let mut sign = vec![self.sign];
+        let mut seed = vec![self.seed];
+        for i in 0..input_length {
+            let mut next_sign = Vec::with_capacity(1 << (i + 1));
+            let mut next_seed = Vec::with_capacity(1 << (i + 1));
+            let bits_left = (BITS_OF_SECURITY - i) & (BITS_OF_SECURITY - 1);
+            for k in 0..1 << i {
+                let current_node = (k as u128) << bits_left;
+                let mut correction_seed =
+                    OkvsDmpf::correct(current_node.into(), sign[k], &self.cws[i]);
+                let (correction_sign_left, correction_sign_right) =
+                    correction_seed.pop_first_two_bits();
+                let [mut seed_prg_false, mut seed_prg_true] =
+                    double_prg(&seed[k], &DOUBLE_PRG_CHILDREN);
+                let [sign_corr_false, sign_corr_true] =
+                    [correction_sign_left, correction_sign_right];
+                let (sign_prg_false, _) = seed_prg_false.pop_first_two_bits();
+                let (sign_prg_true, _) = seed_prg_true.pop_first_two_bits();
+                let seed_false = &correction_seed ^ &seed_prg_false;
+                let seed_true = &correction_seed ^ &seed_prg_true;
+                let sign_false = sign_corr_false ^ sign_prg_false;
+                let sign_true = sign_corr_true ^ sign_prg_true;
+                next_seed.push(seed_false);
+                next_seed.push(seed_true);
+                next_sign.push(sign_false);
+                next_sign.push(sign_true);
+            }
+            seed = next_seed;
+            sign = next_sign;
+        }
+        let last_cw = self.cws.last().unwrap();
+        seed.into_iter()
+            .zip(sign.into_iter())
+            .enumerate()
+            .map(|(idx, (seed, sign))| {
+                let input_node = ((idx as u128) << (BITS_OF_SECURITY - input_length)).into();
+                let mut node_output = &seed ^ &OkvsDmpf::conv_correct(input_node, sign, last_cw);
+                node_output.mask(self.output_len);
+                node_output.into()
+            })
+            .collect::<Vec<_>>()
+            .into()
     }
     fn make_session(&self) -> Self {
         unimplemented!()
@@ -427,12 +460,16 @@ mod test {
         });
         let input_map: HashMap<u128, u128> = inputs.iter().copied().collect();
         let (key_1, key_2) = scheme.try_gen(&inputs[..], &mut rng).unwrap();
+        let eval_all_1 = key_1.eval_all();
+        let eval_all_2 = key_2.eval_all();
         for i in 0..(1 << INPUT_SIZE) {
             let mut output_1 = 0u128;
             let mut output_2 = 0u128;
             let encoded_i = encode_input(i, INPUT_SIZE);
             key_1.eval(&encoded_i, &mut output_1);
             key_2.eval(&encoded_i, &mut output_2);
+            assert_eq!(output_1, eval_all_1[i]);
+            assert_eq!(output_2, eval_all_2[i]);
             let output = output_1 ^ output_2;
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
