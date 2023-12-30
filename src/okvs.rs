@@ -15,7 +15,7 @@ impl<const W: usize> Okvs<W> {
     fn decode(&self, key: u128) -> u128 {
         match self {
             Okvs::RbOkvs(v) => v.decode(key),
-            Okvs::InformationTheoretic(v) => v.decode(key as usize),
+            Okvs::InformationTheoretic(v) => v.decode(key),
         }
     }
 }
@@ -35,10 +35,8 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
         let mut sign = self.sign;
         let input_node = Node::from(*input);
         for i in 0..input_length {
-            println!("Seed and sign at iter {i} are {:?}, {}", seed, sign);
             let mut v = input_node;
             v.mask(i);
-            println!("\tQuerying v: {v:?}");
             let mut correction_seed = OkvsDmpf::correct(v, sign, &self.cws[i]);
             let (correction_sign_left, correction_sign_right) =
                 correction_seed.pop_first_two_bits();
@@ -48,11 +46,9 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
             let input_bit_usize = input_bit as usize;
             let mut seed_prg = seeds[input_bit_usize];
             let (sign_prg, _) = seed_prg.pop_first_two_bits();
-            println!("SEED PRG: {seed_prg:?}");
             seed = &correction_seed ^ &seed_prg;
             sign = signs[input_bit_usize] ^ sign_prg;
         }
-        println!("My sign and seed at end: {sign}, {seed:?}");
         let mut node_output =
             &seed ^ &OkvsDmpf::conv_correct(input_node, sign, self.cws.last().unwrap());
         node_output.mask(self.output_len);
@@ -114,7 +110,7 @@ pub struct OkvsDmpf<const W: usize> {
     epsilon_percent: EpsilonPercent,
 }
 impl<const W: usize> OkvsDmpf<W> {
-    fn new(
+    pub fn new(
         input_len: usize,
         output_len: usize,
         point_count: usize,
@@ -197,13 +193,11 @@ impl<const W: usize> Dmpf for OkvsDmpf<W> {
                 let mut first_cw = Self::correct(str_bitvec.as_ref()[0], signs_0[idx], &cur_cw);
                 let (first_sign_left, first_sign_right) = first_cw.pop_first_two_bits();
                 let first_signs = [first_sign_left, first_sign_right];
-                println!("First CW: {first_cw:?}");
 
                 // Correcting second share
                 let mut second_cw = Self::correct(str_bitvec.as_ref()[0], signs_1[idx], &cur_cw);
                 let (second_sign_left, second_sign_right) = second_cw.pop_first_two_bits();
                 let second_signs = [second_sign_left, second_sign_right];
-                println!("Second CW: {second_cw:?}");
 
                 let prg_0 = double_prg(&seeds_0[idx], &DOUBLE_PRG_CHILDREN);
                 let prg_1 = double_prg(&seeds_1[idx], &DOUBLE_PRG_CHILDREN);
@@ -218,12 +212,10 @@ impl<const W: usize> Dmpf for OkvsDmpf<W> {
                         next_signs_0.push(cur_bit_0 ^ first_signs[son_direction]);
                         next_signs_1.push(cur_bit_1 ^ second_signs[son_direction]);
                     } else {
-                        println!("Missing son direction: {son_direction}");
                         let mut cur_0 = prg_0[son_direction];
                         let mut cur_1 = prg_1[son_direction];
                         let (cur_bit_0, _) = cur_0.pop_first_two_bits();
                         let (cur_bit_1, _) = cur_1.pop_first_two_bits();
-                        println!("Missing son XOR seeds: {:?}", &cur_0 ^ &cur_1);
                         assert_eq!(&cur_0 ^ &first_cw, &cur_1 ^ &second_cw);
                         assert_eq!(
                             cur_bit_0 ^ first_signs[son_direction],
@@ -349,48 +341,55 @@ impl<const W: usize> OkvsDmpf<W> {
             } else {
                 debug_assert!(left_son.is_some() || right_son.is_some());
                 let (mut r, left_sign, right_sign) = if left_son.is_some() {
-                    println!("Left is some");
-                    dbg!(delta_seed_right);
                     (delta_seed_right, !delta_sign_left, delta_sign_right)
                 } else {
-                    println!("Right is some");
-                    dbg!(delta_seed_left);
                     (delta_seed_left, delta_sign_left, !delta_sign_right)
                 };
                 r.push_first_two_bits(left_sign, right_sign);
                 r
             };
-            println!("r: {r:?}");
-            println!("str: {str:?}");
             v.push((str.as_ref()[0].into(), u128::from(r)));
             idx += 1;
         }
         let mut candidate = 0;
         let step = 1u128.overflowing_shl((BITS_OF_SECURITY - depth) as u32).0;
         let mut v_idx = 0;
-        dbg!(depth);
         let v_orig_len = v.len();
-        while v.len() < t.min(1 << (depth.min((usize::BITS - 1) as usize))) {
-            if v_idx < v_orig_len {
-                if v[v_idx].0 == candidate {
-                    candidate += step;
-                    v_idx += 1;
-                    continue;
+        let new_vec_len = t.min(1 << (depth.min((usize::BITS - 1) as usize)));
+        let items_to_add = new_vec_len - v.len();
+        let new_v = if items_to_add == 0 {
+            v
+        } else {
+            let mut new_v = Vec::with_capacity(new_vec_len);
+            let mut items_added = 0;
+            while new_v.len() < new_vec_len && items_added < items_to_add {
+                if v_idx < v_orig_len {
+                    if v[v_idx].0 == candidate {
+                        new_v.push(v[v_idx]);
+                        candidate += step;
+                        v_idx += 1;
+                        continue;
+                    }
                 }
+                items_added += 1;
+                let val = random_u128(rng);
+                new_v.push((candidate, val));
+                candidate = candidate.overflowing_add(step).0;
             }
-            let val = random_u128(rng);
-            v.push((candidate, val));
-            candidate = candidate.overflowing_add(step).0;
-        }
-        dbg!(&v);
+            while new_v.len() < new_vec_len {
+                new_v.push(v[v_idx]);
+                v_idx += 1;
+            }
+            new_v
+        };
         // In this case we go for information theoretic OKVS
         if points_trie.len() >= (1 << depth) {
             Okvs::InformationTheoretic(InformationTheoreticOkvs::encode(
                 depth,
-                v.into_iter().map(|v| v.1).collect(),
+                new_v.into_iter().map(|v| v.1).collect(),
             ))
         } else {
-            Okvs::RbOkvs(rb_okvs::encode::<W>(&v, epsilon_percent))
+            Okvs::RbOkvs(rb_okvs::encode::<W>(&new_v, epsilon_percent))
         }
     }
 }
@@ -419,12 +418,12 @@ impl InformationTheoreticOkvs {
     fn encode(mut input_length_in_bits: usize, values: Box<[u128]>) -> Self {
         assert_eq!(values.len(), 1 << input_length_in_bits);
         if input_length_in_bits == 0 {
-            input_length_in_bits = 64;
+            input_length_in_bits = 128;
         }
         Self(values, input_length_in_bits)
     }
-    fn decode(&self, i: usize) -> u128 {
-        self.0[i >> (64 - self.1)]
+    fn decode(&self, i: u128) -> u128 {
+        self.0[(i >> (BITS_OF_SECURITY - self.1)) as usize]
     }
 }
 
@@ -441,8 +440,8 @@ mod test {
     #[test]
     fn test_okvs_dmpf() {
         const W: usize = 5;
-        const POINTS: usize = 10;
-        const INPUT_SIZE: usize = 10;
+        const POINTS: usize = 2;
+        const INPUT_SIZE: usize = 15;
         const OUTPUT_SIZE: usize = 10;
         let scheme = OkvsDmpf::<W>::new(
             INPUT_SIZE,

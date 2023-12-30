@@ -176,11 +176,9 @@ impl<const W: usize> EncodedOkvs<W> {
             .map(|(mut bits, chunk)| {
                 let mut sum: V = 0;
                 for idx in 0..chunk.len() {
-                    let bit = bits & 1 != 0;
+                    let bit = (bits & 1) as u128;
                     bits = bits.overflowing_shr(1).0;
-                    if bit {
-                        sum ^= chunk[idx]
-                    }
+                    sum ^= bit * chunk[idx]
                 }
                 sum
             })

@@ -93,7 +93,6 @@ impl BigStateCorrectionWord {
     }
     pub fn correct(&self, sign: &BitVec, output: &mut [Node]) {
         let t = sign.len();
-        output.iter_mut().for_each(|node| node.zero());
         for i in 0..sign.len() {
             let bit = sign.get(i);
             let entry = self.get_entry(i, t);
@@ -270,7 +269,6 @@ impl BigStateDpfKey {
             let mut state_idx = 0;
             let time = Instant::now();
             alphas.iter_at_depth(i).enumerate().count();
-            println!("Iter at depth: {} took: {}", i, time.elapsed().as_micros());
             for (k, node) in alphas.iter_at_depth(i).enumerate() {
                 cw.correct(&sign_0_prev[k], &mut correction_container_0);
                 cw.correct(&sign_1_prev[k], &mut correction_container_1);
