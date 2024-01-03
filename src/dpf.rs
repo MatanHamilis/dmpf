@@ -254,6 +254,56 @@ impl<'a> PartialOrd for BitSlice<'a> {
     }
 }
 #[derive(Debug, PartialEq, Eq)]
+pub struct BitSliceMut<'a> {
+    v: &'a mut [Node],
+    len: usize,
+}
+impl<'a> BitSliceMut<'a> {
+    pub fn new(len: usize, v: &'a mut [Node]) -> Self {
+        BitSliceMut { v: v.as_mut(), len }
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn get(&self, index: usize) -> bool {
+        let (cell, idx) = BitVec::coordinates(index);
+        self.v[cell].get_bit(idx)
+    }
+    pub fn set(&mut self, index: usize, val: bool) {
+        let (cell, idx) = BitVec::coordinates(index);
+        self.v[cell].set_bit(idx, val);
+    }
+}
+impl<'a> AsMut<[Node]> for BitSliceMut<'a> {
+    fn as_mut(&mut self) -> &mut [Node] {
+        self.v
+    }
+}
+impl<'a> BitXorAssign<&BitSliceMut<'a>> for BitSliceMut<'a> {
+    fn bitxor_assign(&mut self, rhs: &BitSliceMut<'a>) {
+        assert_eq!(self.len, rhs.len);
+        for i in 0..self.v.len() {
+            self.v[i].bitxor_assign(&rhs.v[i]);
+        }
+    }
+}
+impl<'a> BitXorAssign<&BitVec> for BitSliceMut<'a> {
+    fn bitxor_assign(&mut self, rhs: &BitVec) {
+        assert_eq!(self.len, rhs.len);
+        for i in 0..self.v.len() {
+            self.v[i].bitxor_assign(&rhs.v[i]);
+        }
+    }
+}
+impl<'a> From<&'a mut BitVec> for BitSliceMut<'a> {
+    fn from(value: &'a mut BitVec) -> Self {
+        Self {
+            v: &mut value.v,
+            len: value.len,
+        }
+    }
+}
+#[derive(Debug, PartialEq, Eq)]
 pub struct BitSlice<'a> {
     v: &'a [Node],
     len: usize,
@@ -439,7 +489,7 @@ impl DpfKey {
         };
         (first_key, second_key)
     }
-    pub fn eval(&self, x: &BitVec, output: &mut BitVec) {
+    pub fn eval(&self, x: &BitSlice, output: &mut BitSliceMut) {
         assert_eq!(x.len(), self.input_bits);
         assert_eq!(output.len(), self.output_bits);
 
@@ -610,10 +660,10 @@ mod tests {
         for i in 0usize..1 << DEPTH {
             let bits_i = int_to_bits(i, DEPTH);
             let input = BitVec::from(&bits_i[..]);
-            let mut bs_output_0 = &mut output_0;
-            let mut bs_output_1 = &mut output_1;
-            k_0.eval(&input, &mut bs_output_0);
-            k_1.eval(&input, &mut bs_output_1);
+            let bs_output_0 = &mut output_0;
+            let bs_output_1 = &mut output_1;
+            k_0.eval(&(&input).into(), &mut (bs_output_0).into());
+            k_1.eval(&(&input).into(), &mut (bs_output_1).into());
             if i != alpha_idx {
                 assert_eq!(&bs_output_0, &bs_output_1);
             }
