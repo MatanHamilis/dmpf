@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use aes_prng::AesRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 
-use crate::{dpf::BitSlice, BitVec, Dmpf, DmpfKey, DpfKey, Node};
+use crate::{dpf::BitSlice, BitSliceMut, BitVec, Dmpf, DmpfKey, DpfKey, Node};
 
 pub struct BatchCodeDmpf {
     input_domain_log_size: usize,
@@ -11,11 +11,25 @@ pub struct BatchCodeDmpf {
     expansion_overhead_in_percent: usize,
 }
 
+impl BatchCodeDmpf {
+    pub fn new(
+        input_domain_log_size: usize,
+        hash_functions_count: usize,
+        expansion_overhead_in_percent: usize,
+    ) -> Self {
+        Self {
+            input_domain_log_size,
+            hash_functions_count,
+            expansion_overhead_in_percent,
+        }
+    }
+}
+
 pub struct BatchCodeDmpfKey {
     input_domain_log_size: usize,
-    log_bucket_size: usize,
+    dpf_input_length: usize,
     buckets: Vec<DpfKey>,
-    hash_functions: Vec<HashFunction>,
+    hash_functions: HashFunctionIndex,
 }
 
 impl Dmpf for BatchCodeDmpf {
@@ -29,9 +43,10 @@ impl Dmpf for BatchCodeDmpf {
         mut rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
         let buckets = (inputs.len() * (100 + self.expansion_overhead_in_percent)) / 100;
-        let bucket_size = ((1 << self.input_domain_log_size) * self.hash_functions_count) / buckets;
-        let bucket_log_size = usize::ilog2(bucket_size) as usize;
-        assert_eq!(1 << bucket_log_size, bucket_size);
+        let bucket_size =
+            ((1 << self.input_domain_log_size) * self.hash_functions_count).div_ceil(buckets);
+        let dpf_input_length = usize::ilog2(2 * bucket_size - 1) as usize;
+        // assert_eq!(1 << bucket_log_size, bucket_size);
         let index_to_value_map: HashMap<_, _> = inputs
             .iter()
             .map(|v| {
@@ -42,54 +57,50 @@ impl Dmpf for BatchCodeDmpf {
             })
             .collect();
         let indices: Vec<_> = index_to_value_map.keys().copied().collect();
-        let hash_functions_seeds: Vec<_> = (0..self.hash_functions_count)
-            .map(|_| {
-                let mut seed = [0; aes_prng::SEED_SIZE];
-                rng.fill_bytes(&mut seed);
-                seed
-            })
-            .collect();
+        let mut hash_functions_seed = [0u8; aes_prng::SEED_SIZE];
+        rng.fill_bytes(&mut hash_functions_seed);
         let encoding = batch_encode::<AesRng>(
             self.input_domain_log_size,
             &indices[..],
             buckets,
-            &hash_functions_seeds[..],
+            self.hash_functions_count,
+            hash_functions_seed,
             &mut rng,
         );
         let mut dpfs: Vec<_> = (0..buckets)
             .map(|_| {
                 let roots = (Node::random(&mut rng), Node::random(&mut rng));
-                let alpha = BitVec::new(bucket_log_size);
+                let alpha = BitVec::new(dpf_input_length);
                 let beta = BitVec::new(128);
                 DpfKey::gen(&roots, &alpha, &beta)
             })
             .collect();
         for (index, (bucket, index_in_bucket)) in encoding {
             let value = index_to_value_map[&index];
-            let mut alpha = BitVec::new(bucket_log_size);
-            alpha.as_mut()[0] =
-                ((index_in_bucket as u128) << (128 - self.input_domain_log_size)).into();
+            let mut alpha = BitVec::new(dpf_input_length);
+            alpha.as_mut()[0] = ((index_in_bucket as u128) << (128 - dpf_input_length)).into();
             let mut beta = BitVec::new(128);
             beta.as_mut()[0] = value.into();
             let roots = (Node::random(&mut rng), Node::random(&mut rng));
             dpfs[bucket] = DpfKey::gen(&roots, &alpha, &beta);
         }
         let (dpfs_0, dpfs_1): (Vec<_>, Vec<_>) = dpfs.into_iter().unzip();
-        let hash_functions = gen_hash_functions::<AesRng>(
+        let (_, hash_functions) = gen_hash_functions::<AesRng>(
             self.input_domain_log_size,
             bucket_size,
-            &hash_functions_seeds[..],
+            self.hash_functions_count,
+            hash_functions_seed,
         );
         Some((
             BatchCodeDmpfKey {
                 input_domain_log_size: self.input_domain_log_size,
-                log_bucket_size: bucket_log_size,
+                dpf_input_length,
                 buckets: dpfs_0,
                 hash_functions: hash_functions.clone(),
             },
             BatchCodeDmpfKey {
                 input_domain_log_size: self.input_domain_log_size,
-                log_bucket_size: bucket_log_size,
+                dpf_input_length,
                 buckets: dpfs_1,
                 hash_functions,
             },
@@ -103,16 +114,30 @@ impl DmpfKey for BatchCodeDmpfKey {
     type Session = ();
     fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
         let input_usize = (input >> (128 - self.input_domain_log_size)) as usize;
-        let mut output = [Node::default()];
+        let mut output_node = [Node::default()];
+        let mut output_slice = BitSliceMut::new(128, &mut output_node);
         for f in self.hash_functions.iter() {
-            let (bucket, index) = f.eval(input_usize);
-            let node = [Node::from((index as u128) << (128 - self.log_bucket_size))];
-            let input_bitvec = BitSlice::new(self.log_bucket_size, &node[..]);
-            self.buckets[bucket].eval(&input_bitvec, output)
+            let (bucket, index) = self.hash_functions.eval(input_usize, f);
+            let node = [Node::from((index as u128) << (128 - self.dpf_input_length))];
+            let input_bitvec = BitSlice::new(self.dpf_input_length, &node[..]);
+            self.buckets[bucket].eval(&input_bitvec, &mut output_slice);
+            *output ^= <Node as AsRef<u128>>::as_ref(&output_slice.as_mut()[0]);
         }
     }
     fn eval_all(&self) -> Box<[Self::OutputContainer]> {
-        unimplemented!()
+        let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
+        let input_domain_size = 1 << self.input_domain_log_size;
+        let mut output = Vec::with_capacity(input_domain_size);
+        let mut output_node = [Node::default()];
+        for i in 0..input_domain_size {
+            let mut output_cur = 0u128;
+            for (bucket, bucket_idx) in self.hash_functions.eval_all(i) {
+                dpfs_eval_all[bucket].get_item(bucket_idx, &mut output_node);
+                output_cur ^= *<Node as AsRef<u128>>::as_ref(&output_node[0]);
+            }
+            output.push(output_cur);
+        }
+        output.into()
     }
     fn make_session(&self) -> Self {
         unimplemented!()
@@ -120,80 +145,87 @@ impl DmpfKey for BatchCodeDmpfKey {
 }
 
 #[derive(Clone)]
-struct HashFunction {
-    permutation: Vec<usize>,
+struct HashFunctionIndex {
+    contents: Vec<usize>,
+    hash_functions_count: usize,
     bucket_size: usize,
-    base_bucket: usize,
 }
-impl HashFunction {
-    fn new<R: RngCore + CryptoRng + SeedableRng>(
-        input_domain_log_size: usize,
-        bucket_size: usize,
-        mut rng: R,
-        bucket_id: usize,
-    ) -> Self {
-        let input_domain_size: usize = 1 << input_domain_log_size;
-        let permutation = Self::random_permutation(input_domain_size, rng);
-        let base_bucket = input_domain_size.div_ceil(bucket_size) * bucket_id;
+impl HashFunctionIndex {
+    fn new(hash_functions_count: usize, input_domain_log_size: usize, bucket_size: usize) -> Self {
         Self {
-            permutation,
+            contents: vec![usize::MAX; hash_functions_count << input_domain_log_size],
+            hash_functions_count,
             bucket_size,
-            base_bucket,
         }
     }
-    fn eval(&self, item: usize) -> (usize, usize) {
-        let v = self.permutation[item];
-        (
-            self.base_bucket + (v / self.bucket_size),
-            v % self.bucket_size,
-        )
-    }
-    fn random_permutation<R: CryptoRng + RngCore>(n: usize, mut rng: R) -> Vec<usize> {
-        let mut output: Vec<_> = (0..n).collect();
-        for i in 1..n {
-            let r = (rng.next_u64() as usize) % (i + 1);
-            output.swap(i, r);
+    fn map(&mut self, from: usize, to: usize) {
+        let base_idx = from * self.hash_functions_count;
+        for i in 0..self.hash_functions_count {
+            if self.contents[base_idx + i] == usize::MAX {
+                self.contents[base_idx + i] = to;
+                return;
+            }
         }
-        output
+        panic!("Too many mappings");
+    }
+    fn eval(&self, from: usize, function_idx: usize) -> (usize, usize) {
+        debug_assert!(function_idx < self.hash_functions_count);
+        let v = self.contents[self.hash_functions_count * from + function_idx];
+        (v / self.bucket_size, v % self.bucket_size)
+    }
+    fn eval_all(&self, from: usize) -> impl '_ + Iterator<Item = (usize, usize)> {
+        let v = &self.contents
+            [self.hash_functions_count * from..self.hash_functions_count * (from + 1)];
+        v.iter()
+            .map(|v| (v / self.bucket_size, v % self.bucket_size))
+    }
+    fn iter(&self) -> impl Iterator<Item = usize> {
+        0..self.hash_functions_count
     }
 }
+
 fn gen_hash_functions<R: RngCore + CryptoRng + SeedableRng>(
     input_domain_log_size: usize,
     bucket_size: usize,
-    seeds: &[R::Seed],
-) -> Vec<HashFunction>
-where
-    R::Seed: Clone + Copy,
-{
-    seeds
-        .iter()
-        .enumerate()
-        .map(|(idx, s)| {
-            let mut rng = R::from_seed(*s);
-            HashFunction::new(input_domain_log_size, bucket_size, rng, idx)
-        })
-        .collect()
+    hash_functions_count: usize,
+    seed: R::Seed,
+) -> (Vec<usize>, HashFunctionIndex) {
+    let mut rng = R::from_seed(seed);
+    let total_domain_size = hash_functions_count << input_domain_log_size;
+    let mut permutation: Vec<_> = (0..(1 << input_domain_log_size))
+        .cycle()
+        .take(total_domain_size)
+        .collect();
+    let mut mapping =
+        HashFunctionIndex::new(hash_functions_count, input_domain_log_size, bucket_size);
+    for i in 0..permutation.len() {
+        let swap_id = i + (rng.next_u64() as usize) % (permutation.len() - i);
+        permutation.swap(i, swap_id);
+        let from_mapping = permutation[i];
+        mapping.map(from_mapping, i);
+    }
+    (permutation, mapping)
 }
 
 fn batch_encode<R: CryptoRng + RngCore + SeedableRng>(
     input_domain_log_size: usize,
     indices: &[usize],
     buckets: usize,
-    hash_functions_seeds: &[R::Seed],
+    hash_functions_count: usize,
+    seed: R::Seed,
     mut rng: impl CryptoRng + RngCore,
 ) -> Vec<(usize, (usize, usize))>
 where
     R::Seed: Clone + Copy,
 {
     let input_domain_size = 1 << input_domain_log_size;
-    let hash_functions_num = hash_functions_seeds.len();
-    let bucket_size = (input_domain_size * hash_functions_num) / buckets;
-    assert_eq!(
-        bucket_size * buckets,
-        input_domain_size * hash_functions_num
+    let bucket_size = (input_domain_size * hash_functions_count).div_ceil(buckets);
+    let (_, hash_functions) = gen_hash_functions::<R>(
+        input_domain_log_size,
+        bucket_size,
+        hash_functions_count,
+        seed,
     );
-    let hash_functions =
-        gen_hash_functions::<R>(input_domain_log_size, bucket_size, hash_functions_seeds);
     let mut item_to_bucket = vec![None; indices.len()];
     let mut bucket_to_item = vec![None; buckets];
     let mut bucket_randomness = rng.next_u64() as usize;
@@ -204,19 +236,19 @@ where
     for _ in 0..(indices.len() * indices.len()) {
         let item_to_map = indices[index_to_map];
         // Sample random function
-        let function_id = bucket_randomness % hash_functions_num;
-        bucket_randomness /= hash_functions_num;
-        if bucket_randomness < hash_functions_num {
+        let function_id = bucket_randomness % hash_functions_count;
+        bucket_randomness /= hash_functions_count;
+        if bucket_randomness < hash_functions_count {
             bucket_randomness = rng.next_u64() as usize;
         }
 
-        let (bucket, index_in_bucket) = hash_functions[function_id].eval(indices[item_to_map]);
+        let (bucket, index_in_bucket) = hash_functions.eval(item_to_map, function_id);
 
         index_to_map = if let Some(v) = bucket_to_item[bucket].replace(index_to_map) {
             item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));
             item_to_bucket[v] = None;
             iterations_without_advance += 1;
-            if iterations_without_advance <= indices.len() * hash_functions_num {
+            if iterations_without_advance <= indices.len() * hash_functions_count {
                 v
             } else {
                 panic!("Can't find matching");
@@ -241,12 +273,15 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use aes_prng::AesRng;
-    use rand::thread_rng;
+    use rand::{thread_rng, RngCore};
 
-    use crate::batch_code::gen_hash_functions;
+    use crate::{
+        batch_code::{gen_hash_functions, BatchCodeDmpf},
+        random_u128, Dmpf, DmpfKey,
+    };
 
     use super::batch_encode;
 
@@ -257,22 +292,28 @@ mod test {
         let indices_count: usize = 1 << 10;
         let hash_functions_count = 3;
         let indices = make_indices(indices_count);
-        let seeds = make_seeds(hash_functions_count);
+        let mut seed = [0u8; aes_prng::SEED_SIZE];
+        thread_rng().fill_bytes(&mut seed);
         let buckets = indices_count * 3 / 2;
-        let bucket_size = (input_domain_size * seeds.len()) / buckets;
+        let bucket_size = ((input_domain_size * hash_functions_count) as usize).div_ceil(buckets);
         let encoding = batch_encode::<AesRng>(
             input_domain_log_size,
             &indices[..],
             buckets,
-            &seeds[..],
+            hash_functions_count,
+            seed,
             thread_rng(),
         );
 
         // Ensure we receive a mapping for each input.
         assert_eq!(encoding.len(), indices.len());
 
-        let hash_functions =
-            gen_hash_functions::<AesRng>(input_domain_log_size, bucket_size, &seeds[..]);
+        let (_, hash_functions) = gen_hash_functions::<AesRng>(
+            input_domain_log_size,
+            bucket_size,
+            hash_functions_count,
+            seed,
+        );
 
         // Assert all buckets a output of some hash function for the given index.
         for i in indices.iter().copied() {
@@ -281,7 +322,7 @@ mod test {
                 .copied()
                 .find_map(|v| if v.0 == i { Some(v.1) } else { None })
                 .unwrap();
-            assert!(hash_functions.iter().any(|f| f.eval(i).0 == bucket));
+            assert!((0..hash_functions_count).any(|f| hash_functions.eval(i, f).0 == bucket));
             assert!(index_in_bucket < bucket_size);
         }
 
@@ -289,13 +330,47 @@ mod test {
         let set: HashSet<_> = encoding.iter().map(|(_, b)| *b).collect();
         assert_eq!(set.len(), indices.len());
     }
-    fn make_seed(i: usize) -> [u8; aes_prng::SEED_SIZE] {
-        (i as u128).to_be_bytes()
-    }
-    fn make_seeds(count: usize) -> Vec<[u8; aes_prng::SEED_SIZE]> {
-        (0..count).map(|i| make_seed(i)).collect()
-    }
     fn make_indices(count: usize) -> Vec<usize> {
         (0..count).collect()
+    }
+
+    #[test]
+    fn test_batch_code_dmpf() {
+        const W: usize = 3;
+        const POINTS: usize = 53;
+        const INPUT_SIZE: usize = 10;
+        const OUTPUT_SIZE: usize = 127;
+        const EXPANSION_OVERHEAD_IN_PERCENT: usize = 50;
+        let scheme = BatchCodeDmpf::new(INPUT_SIZE, W, EXPANSION_OVERHEAD_IN_PERCENT);
+        let mut rng = thread_rng();
+        let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
+        let inputs: [_; POINTS] = core::array::from_fn(|i| {
+            (
+                encode_input(i, INPUT_SIZE),
+                random_u128(&mut rng) & output_mask,
+            )
+        });
+        let input_map: HashMap<u128, u128> = inputs.iter().copied().collect();
+        let (key_1, key_2) = scheme.try_gen(&inputs[..], &mut rng).unwrap();
+        let eval_all_1 = key_1.eval_all();
+        let eval_all_2 = key_2.eval_all();
+        for i in 0..(1 << INPUT_SIZE) {
+            let mut output_1 = 0u128;
+            let mut output_2 = 0u128;
+            let encoded_i = encode_input(i, INPUT_SIZE);
+            key_1.eval(&encoded_i, &mut output_1);
+            key_2.eval(&encoded_i, &mut output_2);
+            assert_eq!(output_1, eval_all_1[i]);
+            assert_eq!(output_2, eval_all_2[i]);
+            let output = output_1 ^ output_2;
+            if input_map.contains_key(&encoded_i) {
+                assert_eq!(output, input_map[&encoded_i]);
+            } else {
+                assert_eq!(output, 0u128);
+            };
+        }
+    }
+    fn encode_input(i: usize, input_len: usize) -> u128 {
+        (i as u128) << (128 - input_len)
     }
 }

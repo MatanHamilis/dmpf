@@ -3,7 +3,8 @@ use rand::{CryptoRng, RngCore};
 use rb_okvs::{EncodedOkvs, EpsilonPercent};
 
 use crate::{
-    dpf::BitSlice, prg::double_prg, trie::BinaryTrie, BitVec, Dmpf, DmpfKey, Node, BITS_OF_SECURITY,
+    dpf::BitSlice, prg::double_prg, random_u126, random_u128, trie::BinaryTrie, BitVec, Dmpf,
+    DmpfKey, Node, BITS_OF_SECURITY,
 };
 
 #[derive(Clone)]
@@ -405,12 +406,6 @@ impl Cw {
         let mut items = (0..total_items).map(|_| random_u128(rng)).collect();
         Self { items, t }
     }
-}
-fn random_u128<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
-    ((rng.next_u64() as u128) << 64) ^ (rng.next_u64() as u128)
-}
-fn random_u126<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
-    random_u128(rng) & (!3u128)
 }
 #[derive(Clone)]
 pub struct InformationTheoreticOkvs(Box<[u128]>, usize);

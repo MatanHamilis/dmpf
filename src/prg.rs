@@ -9,7 +9,7 @@ const DPF_AES_KEY: [u8; BYTES_OF_SECURITY] =
 static AES: Lazy<Aes128> = Lazy::new(|| Aes128::new_from_slice(&DPF_AES_KEY).unwrap());
 
 pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
-    let mut blocks = [Block::from(*input.as_ref()); 2];
+    let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 2];
     blocks[0][0] ^= children[0];
     blocks[1][0] ^= children[1];
     AES.encrypt_blocks(&mut blocks);
@@ -20,7 +20,7 @@ pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
     unsafe { std::mem::transmute(blocks) }
 }
 pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
-    let mut blocks = [Block::from(*input.as_ref()); 3];
+    let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 3];
     blocks[0][0] ^= children[0];
     blocks[1][0] ^= children[1];
     blocks[2][0] ^= children[2];
@@ -38,7 +38,7 @@ pub fn many_prg(
     mut children: impl Iterator<Item = u16> + Clone,
     output: &mut [Node],
 ) {
-    let input_block = Block::from(*input.as_ref());
+    let input_block = Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input));
     if output.len() > 256 {
         unimplemented!()
     }

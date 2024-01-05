@@ -5,12 +5,12 @@ mod dpf;
 mod prg;
 mod trie;
 pub use dpf::int_to_bits;
-// mod batch_code;
+mod batch_code;
 pub mod okvs;
 
-pub use dpf::BitVec;
 pub use dpf::DpfKey;
 pub use dpf::Node;
+pub use dpf::{BitSlice, BitSliceMut, BitVec};
 use rand::CryptoRng;
 use rand::RngCore;
 pub const BITS_IN_BYTE: usize = 8;
@@ -51,4 +51,11 @@ where
     fn make_session(&self) -> Self;
     fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer);
     fn eval_all(&self) -> Box<[Self::OutputContainer]>;
+}
+
+pub(crate) fn random_u128<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
+    ((rng.next_u64() as u128) << 64) ^ (rng.next_u64() as u128)
+}
+pub(crate) fn random_u126<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {
+    random_u128(rng) & (!3u128)
 }

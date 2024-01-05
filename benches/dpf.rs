@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dmpf_code::{
     big_state::BigStateDpfKey,
     okvs::{Okvs, OkvsDmpf},
-    BitVec, Dmpf, DmpfKey, DpfKey, Node, BITS_OF_SECURITY,
+    BitSliceMut, BitVec, Dmpf, DmpfKey, DpfKey, Node, BITS_OF_SECURITY,
 };
 use rand::{thread_rng, RngCore};
 
@@ -37,8 +37,9 @@ pub fn dpf_bench(c: &mut Criterion) {
                 for i in 0..*depth {
                     x.set(i, rng.next_u32() & 1 == 1)
                 }
-                let mut output = BitVec::new(OUTPUT_WIDTH);
-                b.iter(|| k_0.eval(&x, &mut output));
+                let mut nodes = [Node::default()];
+                let mut output = BitSliceMut::new(OUTPUT_WIDTH, &mut nodes);
+                b.iter(|| k_0.eval(&(&x).into(), &mut output));
             });
         }
     }

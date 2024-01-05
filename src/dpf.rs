@@ -17,6 +17,11 @@ impl From<Node> for u128 {
         value.0
     }
 }
+impl AsRef<u128> for Node {
+    fn as_ref(&self) -> &u128 {
+        &self.0
+    }
+}
 
 impl Node {
     pub fn zero(&mut self) {
