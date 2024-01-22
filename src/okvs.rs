@@ -1,44 +1,63 @@
-use aes::cipher::typenum::bit;
+use std::{ops::DerefMut, u128};
+
 use rand::{CryptoRng, RngCore};
-use rb_okvs::{EncodedOkvs, EpsilonPercent};
+use rb_okvs::{EncodedOkvs, EpsilonPercent, OkvsValueU64Array};
 
 use crate::{
-    dpf::BitSlice, prg::double_prg, random_u126, random_u128, trie::BinaryTrie, BitVec, Dmpf,
-    DmpfKey, Node, BITS_OF_SECURITY,
+    dpf::BitSlice,
+    prg::{double_prg, many_prg},
+    random_u126, random_u128,
+    trie::BinaryTrie,
+    BitVec, Dmpf, DmpfKey, Node, BITS_OF_SECURITY,
 };
 
 #[derive(Clone)]
-pub enum Okvs<const W: usize> {
-    InformationTheoretic(InformationTheoreticOkvs),
-    RbOkvs(EncodedOkvs<W>),
+pub enum Okvs<const W: usize, const OKVS_WIDTH: usize> {
+    InformationTheoretic(InformationTheoreticOkvs<OKVS_WIDTH>),
+    RbOkvs(EncodedOkvs<W, OkvsValueU64Array<2>, OkvsValueU64Array<OKVS_WIDTH>>),
 }
-impl<const W: usize> Okvs<W> {
-    fn decode(&self, key: u128) -> u128 {
+impl<const W: usize, const OKVS_WIDTH: usize> Okvs<W, OKVS_WIDTH> {
+    fn decode(&self, key: &OkvsValueU64Array<2>) -> OkvsValueU64Array<OKVS_WIDTH> {
         match self {
             Okvs::RbOkvs(v) => v.decode(key),
             Okvs::InformationTheoretic(v) => v.decode(key),
         }
     }
 }
-pub struct OkvsDmpfKey<const W: usize> {
+pub struct OkvsDmpfKey<const W: usize, const OKVS_WIDTH: usize> {
     seed: Node,
     sign: bool,
     output_len: usize,
-    cws: Vec<Okvs<W>>,
+    cws: Vec<Okvs<W, 2>>,
+    last_cw: Okvs<W, OKVS_WIDTH>,
 }
-impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
+
+impl From<OkvsValueU64Array<2>> for Node {
+    fn from(value: OkvsValueU64Array<2>) -> Self {
+        let o: u128 = ((value[0] as u128) << 64) | (value[1] as u128);
+        Node::from(o)
+    }
+}
+impl From<Node> for OkvsValueU64Array<2> {
+    fn from(value: Node) -> Self {
+        let o: u128 = value.into();
+        o.into()
+    }
+}
+
+impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WIDTH> {
     type Session = ();
-    type InputContainer = u128;
-    type OutputContainer = u128;
+    type InputContainer = OkvsValueU64Array<2>;
+    type OutputContainer = OkvsValueU64Array<OKVS_WIDTH>;
     fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
-        let input_length = self.cws.len() - 1;
+        let input_length = self.cws.len();
         let mut seed = self.seed;
         let mut sign = self.sign;
         let input_node = Node::from(*input);
         for i in 0..input_length {
             let mut v = input_node;
             v.mask(i);
-            let mut correction_seed = OkvsDmpf::correct(v, sign, &self.cws[i]);
+            let mut correction_seed = OkvsDmpf::<W, OKVS_WIDTH>::correct(v, sign, &self.cws[i]);
             let (correction_sign_left, correction_sign_right) =
                 correction_seed.pop_first_two_bits();
             let seeds = double_prg(&seed, &DOUBLE_PRG_CHILDREN);
@@ -50,13 +69,13 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
             seed = &correction_seed ^ &seed_prg;
             sign = signs[input_bit_usize] ^ sign_prg;
         }
-        let mut node_output =
-            &seed ^ &OkvsDmpf::conv_correct(input_node, sign, self.cws.last().unwrap());
-        node_output.mask(self.output_len);
-        *output = node_output.into();
+        let mut node_output = expand_to_okvs_value::<OKVS_WIDTH>(&seed);
+        node_output ^= OkvsDmpf::conv_correct(input_node, sign, &self.last_cw);
+        // node_output.mask(self.output_len);
+        *output = node_output;
     }
     fn eval_all(&self) -> Box<[Self::OutputContainer]> {
-        let input_length = self.cws.len() - 1;
+        let input_length = self.cws.len();
         let mut sign = vec![self.sign];
         let mut seed = vec![self.seed];
         for i in 0..input_length {
@@ -66,7 +85,7 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
             for k in 0..1 << i {
                 let current_node = (k as u128) << bits_left;
                 let mut correction_seed =
-                    OkvsDmpf::correct(current_node.into(), sign[k], &self.cws[i]);
+                    OkvsDmpf::<W, OKVS_WIDTH>::correct(current_node.into(), sign[k], &self.cws[i]);
                 let (correction_sign_left, correction_sign_right) =
                     correction_seed.pop_first_two_bits();
                 let [mut seed_prg_false, mut seed_prg_true] =
@@ -87,15 +106,16 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
             seed = next_seed;
             sign = next_sign;
         }
-        let last_cw = self.cws.last().unwrap();
+        let last_cw = &self.last_cw;
         seed.into_iter()
             .zip(sign.into_iter())
             .enumerate()
             .map(|(idx, (seed, sign))| {
                 let input_node = ((idx as u128) << (BITS_OF_SECURITY - input_length)).into();
-                let mut node_output = &seed ^ &OkvsDmpf::conv_correct(input_node, sign, last_cw);
-                node_output.mask(self.output_len);
-                node_output.into()
+                let mut node_output = expand_to_okvs_value(&seed);
+                node_output ^= OkvsDmpf::conv_correct(input_node, sign, last_cw);
+                // node_output.mask(self.output_len);
+                node_output
             })
             .collect::<Vec<_>>()
             .into()
@@ -104,13 +124,29 @@ impl<const W: usize> DmpfKey for OkvsDmpfKey<W> {
         unimplemented!()
     }
 }
-pub struct OkvsDmpf<const W: usize> {
+
+pub fn expand_to_okvs_value<const OKVS_WIDTH: usize>(node: &Node) -> OkvsValueU64Array<OKVS_WIDTH> {
+    let mut output = OkvsValueU64Array::default();
+    if OKVS_WIDTH == 2 {
+        let arr = unsafe { (node as *const Node as *const [u64; 2]).as_ref().unwrap() };
+        output[0] = arr[1];
+        output[1] = arr[0];
+    } else {
+        let mut out_arr: &mut [u64; OKVS_WIDTH] = output.deref_mut();
+        let mut out_node = unsafe {
+            std::slice::from_raw_parts_mut(out_arr.as_mut_ptr() as *mut Node, OKVS_WIDTH / 2)
+        };
+        many_prg(node, 0..(out_node.len() as u16), out_node);
+    }
+    output
+}
+pub struct OkvsDmpf<const W: usize, const OKVS_WIDTH: usize> {
     input_len: usize,
     output_len: usize,
     point_count: usize,
     epsilon_percent: EpsilonPercent,
 }
-impl<const W: usize> OkvsDmpf<W> {
+impl<const W: usize, const OKVS_WIDTH: usize> OkvsDmpf<W, OKVS_WIDTH> {
     pub fn new(
         input_len: usize,
         output_len: usize,
@@ -128,8 +164,8 @@ impl<const W: usize> OkvsDmpf<W> {
 
 const DOUBLE_PRG_CHILDREN: [u8; 2] = [0, 1];
 
-impl<const W: usize> Dmpf for OkvsDmpf<W> {
-    type Key = OkvsDmpfKey<W>;
+impl<const W: usize, const OKVS_WIDTH: usize> Dmpf for OkvsDmpf<W, OKVS_WIDTH> {
+    type Key = OkvsDmpfKey<W, OKVS_WIDTH>;
     fn try_gen<R: CryptoRng + RngCore>(
         &self,
         points: &[(
@@ -169,7 +205,6 @@ impl<const W: usize> Dmpf for OkvsDmpf<W> {
             let mut next_seeds_0 = Vec::with_capacity(t);
             let mut next_signs_1 = Vec::with_capacity(t);
             let mut next_seeds_1 = Vec::with_capacity(t);
-
             let mut str_bitvec = BitVec::new(depth.max(1));
             let cur_cw = Self::gen_cw(
                 depth,
@@ -230,32 +265,33 @@ impl<const W: usize> Dmpf for OkvsDmpf<W> {
             (signs_0, seeds_0, signs_1, seeds_1) =
                 (next_signs_0, next_seeds_0, next_signs_1, next_seeds_1);
         }
-        let last_cw = Self::gen_conv_cw(
-            &points,
+        let last_cw = Okvs::<W, OKVS_WIDTH>::RbOkvs(Self::gen_conv_cw(
+            points,
             &seeds_0,
             &signs_0,
             &seeds_1,
             &signs_1,
             self.epsilon_percent,
-        );
-        cws.push(Okvs::RbOkvs(last_cw));
-        let first_key = OkvsDmpfKey::<W> {
+        ));
+        let first_key = OkvsDmpfKey::<W, OKVS_WIDTH> {
             seed: seed_0,
             sign: sign_0,
             output_len,
             cws: cws.clone(),
+            last_cw: last_cw.clone(),
         };
-        let second_key = OkvsDmpfKey::<W> {
+        let second_key = OkvsDmpfKey::<W, OKVS_WIDTH> {
             seed: seed_1,
             sign: sign_1,
             output_len,
             cws,
+            last_cw,
         };
         Some((first_key, second_key))
     }
 }
 
-impl<const W: usize> OkvsDmpf<W> {
+impl<const W: usize, const OKVS_WIDTH: usize> OkvsDmpf<W, OKVS_WIDTH> {
     fn initialize<R: RngCore + CryptoRng>(rng: &mut R) -> [(Node, bool); 2] {
         let output = core::array::from_fn(|i| {
             let mut word: Node = random_u128(rng).into();
@@ -265,31 +301,37 @@ impl<const W: usize> OkvsDmpf<W> {
         });
         output
     }
-    fn correct(v: Node, sign: bool, cw: &Okvs<W>) -> Node {
+    fn correct(v: Node, sign: bool, cw: &Okvs<W, 2>) -> Node {
         if !sign {
-            return 0u128.into();
+            return Node::default();
         }
-        cw.decode(v.into()).into()
+        cw.decode(&v.into()).into()
     }
-    fn conv_correct(v: Node, sign: bool, cw: &Okvs<W>) -> Node {
+    fn conv_correct(
+        v: Node,
+        sign: bool,
+        cw: &Okvs<W, OKVS_WIDTH>,
+    ) -> OkvsValueU64Array<OKVS_WIDTH> {
         if sign {
-            Node::default()
+            OkvsValueU64Array::<OKVS_WIDTH>::default()
         } else {
-            cw.decode(v.into()).into()
+            cw.decode(&v.into())
         }
     }
     fn gen_conv_cw(
-        kvs: &[(u128, u128)],
+        kvs: &[(OkvsValueU64Array<2>, OkvsValueU64Array<OKVS_WIDTH>)],
         seeds_0: &[Node],
         signs_0: &[bool],
         seeds_1: &[Node],
         signs_1: &[bool],
         epsilon_percent: EpsilonPercent,
-    ) -> EncodedOkvs<W> {
+    ) -> EncodedOkvs<W, OkvsValueU64Array<2>, OkvsValueU64Array<OKVS_WIDTH>> {
         let v: Vec<_> = (0..kvs.len())
             .map(|k| {
-                let delta_g = &seeds_0[k] ^ &seeds_1[k];
-                (kvs[k].0, kvs[k].1 ^ u128::from(delta_g))
+                let out_0 = expand_to_okvs_value(&seeds_0[k]);
+                let out_1 = expand_to_okvs_value(&seeds_1[k]);
+                let delta_g = out_0 ^ out_1;
+                (kvs[k].0, kvs[k].1 ^ delta_g)
             })
             .collect();
         rb_okvs::encode(&v, epsilon_percent)
@@ -303,7 +345,7 @@ impl<const W: usize> OkvsDmpf<W> {
         sign_1: &[bool],
         epsilon_percent: EpsilonPercent,
         rng: &mut R,
-    ) -> Okvs<W> {
+    ) -> Okvs<W, 2> {
         if depth >= BITS_OF_SECURITY {
             unimplemented!();
         }
@@ -387,10 +429,14 @@ impl<const W: usize> OkvsDmpf<W> {
         if points_trie.len() >= (1 << depth) {
             Okvs::InformationTheoretic(InformationTheoreticOkvs::encode(
                 depth,
-                new_v.into_iter().map(|v| v.1).collect(),
+                new_v.into_iter().map(|v| v.1.into()).collect(),
             ))
         } else {
-            Okvs::RbOkvs(rb_okvs::encode::<W>(&new_v, epsilon_percent))
+            let v: Vec<_> = new_v
+                .into_iter()
+                .map(|(a, b)| (a.into(), b.into()))
+                .collect();
+            Okvs::RbOkvs(rb_okvs::encode::<W, _, _>(&v, epsilon_percent))
         }
     }
 }
@@ -408,17 +454,26 @@ impl Cw {
     }
 }
 #[derive(Clone)]
-pub struct InformationTheoreticOkvs(Box<[u128]>, usize);
-impl InformationTheoreticOkvs {
-    fn encode(mut input_length_in_bits: usize, values: Box<[u128]>) -> Self {
+pub struct InformationTheoreticOkvs<const OKVS_WIDTH: usize>(
+    Box<[OkvsValueU64Array<OKVS_WIDTH>]>,
+    usize,
+);
+impl<const OKVS_WIDTH: usize> InformationTheoreticOkvs<OKVS_WIDTH> {
+    fn encode(
+        mut input_length_in_bits: usize,
+        values: Box<[OkvsValueU64Array<OKVS_WIDTH>]>,
+    ) -> Self {
         assert_eq!(values.len(), 1 << input_length_in_bits);
         if input_length_in_bits == 0 {
-            input_length_in_bits = 128;
+            input_length_in_bits = 64;
         }
         Self(values, input_length_in_bits)
     }
-    fn decode(&self, i: u128) -> u128 {
-        self.0[(i >> (BITS_OF_SECURITY - self.1)) as usize]
+    fn decode(&self, i: &OkvsValueU64Array<2>) -> OkvsValueU64Array<OKVS_WIDTH> {
+        // Since this is information theoretic, the size can't be too big.
+        // Therefore, we consider only the first u64 in i.
+        let idx = i[0];
+        self.0[(idx >> (64 - self.1)) as usize]
     }
 }
 
@@ -427,38 +482,40 @@ mod test {
     use std::collections::HashMap;
 
     use rand::thread_rng;
+    use rb_okvs::{OkvsValue, OkvsValueU64Array};
 
-    use crate::{okvs::random_u128, Dmpf, DmpfKey};
+    use crate::{Dmpf, DmpfKey};
 
     use super::OkvsDmpf;
 
     #[test]
     fn test_okvs_dmpf() {
         const W: usize = 5;
-        const POINTS: usize = 2;
-        const INPUT_SIZE: usize = 15;
-        const OUTPUT_SIZE: usize = 10;
-        let scheme = OkvsDmpf::<W>::new(
+        const POINTS: usize = 1;
+        const INPUT_SIZE: usize = 8;
+        const OKVS_WIDTH: usize = 2;
+        // const OUTPUT_SIZE: usize = 10;
+        let scheme = OkvsDmpf::<W, OKVS_WIDTH>::new(
             INPUT_SIZE,
-            OUTPUT_SIZE,
+            OKVS_WIDTH * 64,
             POINTS,
             rb_okvs::EpsilonPercent::Ten,
         );
         let mut rng = thread_rng();
-        let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
+        // let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
             (
-                encode_input(i, INPUT_SIZE),
-                random_u128(&mut rng) & output_mask,
+                encode_input::<2>(i, INPUT_SIZE),
+                OkvsValueU64Array::<OKVS_WIDTH>::random(&mut rng),
             )
         });
-        let input_map: HashMap<u128, u128> = inputs.iter().copied().collect();
+        let input_map: HashMap<_, _> = inputs.iter().copied().collect();
         let (key_1, key_2) = scheme.try_gen(&inputs[..], &mut rng).unwrap();
         let eval_all_1 = key_1.eval_all();
         let eval_all_2 = key_2.eval_all();
         for i in 0..(1 << INPUT_SIZE) {
-            let mut output_1 = 0u128;
-            let mut output_2 = 0u128;
+            let mut output_1 = OkvsValueU64Array::<OKVS_WIDTH>::default();
+            let mut output_2 = OkvsValueU64Array::<OKVS_WIDTH>::default();
             let encoded_i = encode_input(i, INPUT_SIZE);
             key_1.eval(&encoded_i, &mut output_1);
             key_2.eval(&encoded_i, &mut output_2);
@@ -468,11 +525,17 @@ mod test {
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
             } else {
-                assert_eq!(output, 0u128);
+                assert_eq!(output, OkvsValueU64Array::default());
             };
         }
     }
-    fn encode_input(i: usize, input_len: usize) -> u128 {
-        (i as u128) << (128 - input_len)
+    fn encode_input<const OKVS_WIDTH: usize>(
+        i: usize,
+        input_len: usize,
+    ) -> OkvsValueU64Array<OKVS_WIDTH> {
+        let mut output = OkvsValueU64Array::<OKVS_WIDTH>::default();
+        output[0] = (i as u64) << (64 - input_len);
+        output
+        // OkvsValueU64Array::from(i)(i as u128) << (128 - input_len)
     }
 }

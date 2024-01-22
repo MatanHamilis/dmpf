@@ -239,7 +239,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dmpf_code"
+name = "dmpf"
 version = "0.1.0"
 dependencies = [
  "aes",
@@ -398,6 +398,15 @@ checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
 dependencies = [
  "hermit-abi",
  "libc",
+]
+
+[[package]]
+name = "ole-pcg"
+version = "0.1.0"
+dependencies = [
+ "aes-prng",
+ "dmpf",
+ "rand",
 ]
 
 [[package]]

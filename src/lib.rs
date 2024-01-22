@@ -5,7 +5,7 @@ mod dpf;
 mod prg;
 mod trie;
 pub use dpf::int_to_bits;
-mod batch_code;
+pub mod batch_code;
 pub mod okvs;
 
 pub use dpf::DpfKey;

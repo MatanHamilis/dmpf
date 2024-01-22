@@ -251,7 +251,7 @@ where
             if iterations_without_advance <= indices.len() * hash_functions_count {
                 v
             } else {
-                panic!("Can't find matching");
+                panic!("Can't find matching, buckets count: {}", buckets);
             }
         } else {
             item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));

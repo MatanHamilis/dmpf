@@ -1,19 +1,92 @@
-use std::ops::SubAssign;
+use std::{
+    fmt::Debug,
+    hash::Hash,
+    marker::PhantomData,
+    ops::{BitXor, BitXorAssign, Deref, DerefMut, Mul, SubAssign},
+};
 
 use aes_prng::AesRng;
-use rand::{RngCore, SeedableRng};
+use rand::{CryptoRng, RngCore, SeedableRng};
 
-type K = u128;
-type V = u128;
+pub trait OkvsValue:
+    BitXorAssign + Default + Clone + Copy + Mul<bool, Output = Self> + Eq + PartialEq + Debug + Hash
+{
+    fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
+    fn hash_seed(&self) -> [u8; 16];
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
+pub struct OkvsValueU64Array<const WIDTH: usize>([u64; WIDTH]);
+impl<const WIDTH: usize> OkvsValue for OkvsValueU64Array<WIDTH> {
+    fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
+        Self(core::array::from_fn(|_| rng.next_u64()))
+    }
+    fn hash_seed(&self) -> [u8; 16] {
+        unsafe { *(&[self.0[0], self.0[1]] as *const u64 as *const u8 as *const [u8; 16]) }
+    }
+}
+
+impl<const WIDTH: usize> Deref for OkvsValueU64Array<WIDTH> {
+    type Target = [u64; WIDTH];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl From<u128> for OkvsValueU64Array<2> {
+    fn from(value: u128) -> Self {
+        let first = (value >> 64) as u64;
+        let second = value as u64;
+        [first, second].into()
+    }
+}
+
+impl<const WIDTH: usize> DerefMut for OkvsValueU64Array<WIDTH> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl<const WIDTH: usize> From<[u64; WIDTH]> for OkvsValueU64Array<WIDTH> {
+    fn from(value: [u64; WIDTH]) -> Self {
+        Self(value)
+    }
+}
+
+impl<const WIDTH: usize> Mul<bool> for OkvsValueU64Array<WIDTH> {
+    type Output = Self;
+    fn mul(self, rhs: bool) -> Self::Output {
+        let rhs_u64 = rhs as u64;
+        Self(core::array::from_fn(|i| self.0[i] * rhs_u64))
+    }
+}
+impl<const WIDTH: usize> BitXorAssign for OkvsValueU64Array<WIDTH> {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0
+            .iter_mut()
+            .zip(rhs.0.iter())
+            .for_each(|(a, b)| *a ^= *b)
+    }
+}
+impl<const WIDTH: usize> BitXor for OkvsValueU64Array<WIDTH> {
+    type Output = Self;
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self ^= rhs;
+        self
+    }
+}
+impl<const WIDTH: usize> Default for OkvsValueU64Array<WIDTH> {
+    fn default() -> Self {
+        Self(core::array::from_fn(|_| 0u64))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
-struct MatrixRow<const W: usize> {
+struct MatrixRow<const W: usize, V: OkvsValue> {
     first_col: usize,
     band: [u64; W],
     rhs: V,
 }
-impl<const W: usize> MatrixRow<W> {
-    fn from_key_value(key: K, value: V, m: usize) -> Self {
+impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
+    fn from_key_value<K: OkvsValue>(key: &K, value: V, m: usize) -> Self {
         let (first_col, band) = hash_key(key, m);
         let mut output = Self {
             band,
@@ -165,27 +238,30 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
 }
 
 #[derive(Clone)]
-pub struct EncodedOkvs<const W: usize>(Vec<V>);
-impl<const W: usize> EncodedOkvs<W> {
-    pub fn decode(&self, key: K) -> V {
-        let (offset, bits) = hash_key::<W>(key, self.0.len());
+pub struct EncodedOkvs<const W: usize, K: OkvsValue, V: OkvsValue>(Vec<V>, PhantomData<K>);
+impl<const W: usize, K: OkvsValue, V: OkvsValue> EncodedOkvs<W, K, V> {
+    pub fn decode(&self, key: &K) -> V {
+        let (offset, bits) = hash_key::<W, K>(key, self.0.len());
         let slice = &self.0[offset..offset + (W * u64::BITS as usize)];
         bits.iter()
             .copied()
             .zip(slice.chunks(u64::BITS as usize))
             .map(|(mut bits, chunk)| {
-                let mut sum: V = 0;
+                let mut sum = V::default();
                 for idx in 0..chunk.len() {
-                    let bit = (bits & 1) as u128;
+                    let bit = (bits & 1) == 1;
                     bits = bits.overflowing_shr(1).0;
-                    sum ^= bit * chunk[idx]
+                    sum ^= chunk[idx] * bit
                 }
                 sum
             })
-            .fold(0, |cur, acc| cur ^ acc)
+            .fold(V::default(), |mut cur, acc| {
+                cur ^= acc;
+                cur
+            })
     }
 }
-impl<const W: usize> SubAssign<&MatrixRow<W>> for MatrixRow<W> {
+impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, V> {
     fn sub_assign(&mut self, rhs: &Self) {
         // If I'm being subtracted, then anyway nothing should change *before* my first column.
         debug_assert_eq!(self.first_col, rhs.first_col);
@@ -200,29 +276,31 @@ impl<const W: usize> SubAssign<&MatrixRow<W>> for MatrixRow<W> {
 
 /// The hash_key function output a row in the sparse matrix.
 /// The row is a band of length 'w' of 0/1 values.
-pub fn hash_key<const W: usize>(k: K, m: usize) -> (usize, [u64; W]) {
-    let block = unsafe { (&k as *const u128 as *const [u8; 16]).as_ref().unwrap() };
-    let mut seed = AesRng::from_seed(*block);
+pub fn hash_key<const W: usize, K: OkvsValue>(k: &K, m: usize) -> (usize, [u64; W]) {
+    let block = k.hash_seed();
+    let mut seed = AesRng::from_seed(block);
     let band: [u64; W] = core::array::from_fn(|_| seed.next_u64());
     let band_start = (seed.next_u64() as usize) % (m - W * 64);
     (band_start, band)
 }
-pub fn encode<const W: usize>(kvs: &[(K, V)], epsilon_percent: EpsilonPercent) -> EncodedOkvs<W> {
+pub fn encode<const W: usize, K: OkvsValue, V: OkvsValue>(
+    kvs: &[(K, V)],
+    epsilon_percent: EpsilonPercent,
+) -> EncodedOkvs<W, K, V> {
     let epsilon_percent_usize = usize::from(epsilon_percent);
     let m = ((100 + epsilon_percent_usize) * kvs.len())
         .div_ceil(100)
         .max(W * 64 + 1);
     let mut matrix: Vec<_> = kvs
         .iter()
-        .copied()
-        .map(|(k, v)| MatrixRow::<W>::from_key_value(k, v, m))
+        .map(|(k, v)| MatrixRow::<W, V>::from_key_value(k, *v, m))
         .collect();
     matrix.sort_by_key(|f| f.first_col);
     // Now we start the Gaussian Elimination.
     // we iterate on the rows
     for i in 0..matrix.len() - 1 {
         let start_column = matrix[i].first_col;
-        let row_ref = unsafe { &*(&matrix[i] as *const MatrixRow<W>) };
+        let row_ref = unsafe { &*(&matrix[i] as *const MatrixRow<W, V>) };
         // for each row we subtract it from all the rows that contain it.
         let mut j = i + 1;
         let mut max_col = start_column;
@@ -268,40 +346,44 @@ pub fn encode<const W: usize>(kvs: &[(K, V)], epsilon_percent: EpsilonPercent) -
     }
     let v = output_vector
         .into_iter()
-        .map(|v| if v.is_none() { 0u128 } else { v.unwrap() })
+        .map(|v| {
+            if v.is_none() {
+                V::default()
+            } else {
+                v.unwrap()
+            }
+        })
         .collect();
-    return EncodedOkvs(v);
+    return EncodedOkvs(v, PhantomData);
 }
 
 #[cfg(test)]
 mod tests {
-    use rand::{thread_rng, RngCore};
+    use rand::thread_rng;
 
-    use crate::{encode, EpsilonPercent, K, V};
+    use crate::{encode, EpsilonPercent, OkvsValue, OkvsValueU64Array};
 
-    const LAMBDA_VAL: usize = 40;
-    fn test_okvs<const W: usize>(kvs: &[(K, V)], epsilon_percent: EpsilonPercent) {
-        let encoded = encode::<W>(&kvs, epsilon_percent);
+    fn test_okvs<const W: usize, K: OkvsValue, V: OkvsValue>(
+        kvs: &[(K, V)],
+        epsilon_percent: EpsilonPercent,
+    ) {
+        let encoded = encode::<W, K, V>(&kvs, epsilon_percent);
         for (k, v) in kvs {
-            assert_eq!(encoded.decode(*k), *v)
+            assert_eq!(encoded.decode(k), *v)
         }
     }
-    fn randomize_kvs(size: usize) -> Vec<(K, V)> {
+    fn randomize_kvs<V: OkvsValue>(size: usize) -> Vec<(V, V)> {
+        let mut rng = thread_rng();
         (0..size)
-            .map(|_| {
-                (
-                    thread_rng().next_u64() as u128,
-                    thread_rng().next_u64() as u128,
-                )
-            })
+            .map(|_| (V::random(&mut rng), V::random(&mut rng)))
             .collect()
     }
     #[test]
     fn test_okvs_small() {
         let kvs = randomize_kvs(10_000);
-        test_okvs::<9>(&kvs, EpsilonPercent::Three);
-        test_okvs::<7>(&kvs, EpsilonPercent::Five);
-        test_okvs::<5>(&kvs, EpsilonPercent::Seven);
-        test_okvs::<4>(&kvs, EpsilonPercent::Ten);
+        test_okvs::<9, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Three);
+        test_okvs::<7, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Five);
+        test_okvs::<5, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Seven);
+        test_okvs::<4, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Ten);
     }
 }
