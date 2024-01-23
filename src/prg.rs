@@ -1,4 +1,4 @@
-use crate::{dpf::Node, xor_arrays, BYTES_OF_SECURITY};
+use crate::{utils::Node, xor_arrays, BYTES_OF_SECURITY};
 use aes::{
     cipher::{BlockEncrypt, KeyInit},
     Aes128, Block,
@@ -7,6 +7,8 @@ use once_cell::sync::Lazy;
 const DPF_AES_KEY: [u8; BYTES_OF_SECURITY] =
     [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2];
 static AES: Lazy<Aes128> = Lazy::new(|| Aes128::new_from_slice(&DPF_AES_KEY).unwrap());
+
+pub(crate) const DOUBLE_PRG_CHILDREN: [u8; 2] = [0, 1];
 
 pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
     let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 2];

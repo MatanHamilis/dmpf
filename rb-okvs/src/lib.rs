@@ -15,50 +15,56 @@ pub trait OkvsValue:
     fn hash_seed(&self) -> [u8; 16];
 }
 
+fn random_u128<R: CryptoRng + RngCore>(mut rng: R) -> u128 {
+    ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128)
+}
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
-pub struct OkvsValueU64Array<const WIDTH: usize>([u64; WIDTH]);
-impl<const WIDTH: usize> OkvsValue for OkvsValueU64Array<WIDTH> {
+pub struct OkvsValueU128Array<const WIDTH: usize>([u128; WIDTH]);
+impl<const WIDTH: usize> OkvsValue for OkvsValueU128Array<WIDTH> {
     fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
-        Self(core::array::from_fn(|_| rng.next_u64()))
+        Self(core::array::from_fn(|_| random_u128(&mut rng)))
     }
     fn hash_seed(&self) -> [u8; 16] {
-        unsafe { *(&[self.0[0], self.0[1]] as *const u64 as *const u8 as *const [u8; 16]) }
+        self.0[0].to_be_bytes()
+    }
+}
+impl<const WIDTH: usize> OkvsValueU128Array<WIDTH> {
+    pub fn get_bit(&self, idx: usize) -> bool {
+        (self.0[idx / 128] >> (127 - (idx & 127))) & 1 == 1
     }
 }
 
-impl<const WIDTH: usize> Deref for OkvsValueU64Array<WIDTH> {
-    type Target = [u64; WIDTH];
+impl<const WIDTH: usize> Deref for OkvsValueU128Array<WIDTH> {
+    type Target = [u128; WIDTH];
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl From<u128> for OkvsValueU64Array<2> {
+impl From<u128> for OkvsValueU128Array<1> {
     fn from(value: u128) -> Self {
-        let first = (value >> 64) as u64;
-        let second = value as u64;
-        [first, second].into()
+        [value].into()
     }
 }
 
-impl<const WIDTH: usize> DerefMut for OkvsValueU64Array<WIDTH> {
+impl<const WIDTH: usize> DerefMut for OkvsValueU128Array<WIDTH> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
-impl<const WIDTH: usize> From<[u64; WIDTH]> for OkvsValueU64Array<WIDTH> {
-    fn from(value: [u64; WIDTH]) -> Self {
+impl<const WIDTH: usize> From<[u128; WIDTH]> for OkvsValueU128Array<WIDTH> {
+    fn from(value: [u128; WIDTH]) -> Self {
         Self(value)
     }
 }
 
-impl<const WIDTH: usize> Mul<bool> for OkvsValueU64Array<WIDTH> {
+impl<const WIDTH: usize> Mul<bool> for OkvsValueU128Array<WIDTH> {
     type Output = Self;
     fn mul(self, rhs: bool) -> Self::Output {
-        let rhs_u64 = rhs as u64;
-        Self(core::array::from_fn(|i| self.0[i] * rhs_u64))
+        let rhs_u128 = rhs as u128;
+        Self(core::array::from_fn(|i| self.0[i] * rhs_u128))
     }
 }
-impl<const WIDTH: usize> BitXorAssign for OkvsValueU64Array<WIDTH> {
+impl<const WIDTH: usize> BitXorAssign for OkvsValueU128Array<WIDTH> {
     fn bitxor_assign(&mut self, rhs: Self) {
         self.0
             .iter_mut()
@@ -66,16 +72,16 @@ impl<const WIDTH: usize> BitXorAssign for OkvsValueU64Array<WIDTH> {
             .for_each(|(a, b)| *a ^= *b)
     }
 }
-impl<const WIDTH: usize> BitXor for OkvsValueU64Array<WIDTH> {
+impl<const WIDTH: usize> BitXor for OkvsValueU128Array<WIDTH> {
     type Output = Self;
     fn bitxor(mut self, rhs: Self) -> Self::Output {
         self ^= rhs;
         self
     }
 }
-impl<const WIDTH: usize> Default for OkvsValueU64Array<WIDTH> {
+impl<const WIDTH: usize> Default for OkvsValueU128Array<WIDTH> {
     fn default() -> Self {
-        Self(core::array::from_fn(|_| 0u64))
+        Self(core::array::from_fn(|_| 0u128))
     }
 }
 
@@ -361,7 +367,7 @@ pub fn encode<const W: usize, K: OkvsValue, V: OkvsValue>(
 mod tests {
     use rand::thread_rng;
 
-    use crate::{encode, EpsilonPercent, OkvsValue, OkvsValueU64Array};
+    use crate::{encode, EpsilonPercent, OkvsValue, OkvsValueU128Array};
 
     fn test_okvs<const W: usize, K: OkvsValue, V: OkvsValue>(
         kvs: &[(K, V)],
@@ -381,9 +387,9 @@ mod tests {
     #[test]
     fn test_okvs_small() {
         let kvs = randomize_kvs(10_000);
-        test_okvs::<9, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Three);
-        test_okvs::<7, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Five);
-        test_okvs::<5, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Seven);
-        test_okvs::<4, OkvsValueU64Array<2>, OkvsValueU64Array<2>>(&kvs, EpsilonPercent::Ten);
+        test_okvs::<9, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Three);
+        test_okvs::<7, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Five);
+        test_okvs::<5, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Seven);
+        test_okvs::<4, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Ten);
     }
 }

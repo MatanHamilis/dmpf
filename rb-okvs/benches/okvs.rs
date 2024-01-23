@@ -1,15 +1,17 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::thread_rng;
-use rb_okvs::{g, EpsilonPercent, LogN, OkvsValueU64Array};
+use rb_okvs::{g, EpsilonPercent, LogN, OkvsValueU128Array};
 
 const LAMBDA: usize = 40;
 fn generate_kvs<const WIDTH: usize>(
     size: usize,
-) -> Vec<(OkvsValueU64Array<WIDTH>, OkvsValueU64Array<WIDTH>)> {
+) -> Vec<(OkvsValueU128Array<WIDTH>, OkvsValueU128Array<WIDTH>)> {
     let mut rng = thread_rng();
-    (0..size).map(|i| (generate_kv(i as u64))).collect()
+    (0..size).map(|i| (generate_kv(i as u128))).collect()
 }
-fn generate_kv<const WIDTH: usize>(i: u64) -> (OkvsValueU64Array<WIDTH>, OkvsValueU64Array<WIDTH>) {
+fn generate_kv<const WIDTH: usize>(
+    i: u128,
+) -> (OkvsValueU128Array<WIDTH>, OkvsValueU128Array<WIDTH>) {
     ([i; WIDTH].into(), [i; WIDTH].into())
 }
 fn bench_encode(c: &mut Criterion) {
@@ -37,7 +39,7 @@ fn bench_encode(c: &mut Criterion) {
                 match w {
                     3 => {
                         b.iter(|| {
-                            rb_okvs::encode::<3, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<3, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -45,7 +47,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     4 => {
                         b.iter(|| {
-                            rb_okvs::encode::<4, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<4, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -53,7 +55,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     5 => {
                         b.iter(|| {
-                            rb_okvs::encode::<5, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<5, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -61,7 +63,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     6 => {
                         b.iter(|| {
-                            rb_okvs::encode::<6, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<6, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -69,7 +71,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     7 => {
                         b.iter(|| {
-                            rb_okvs::encode::<7, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<7, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -77,7 +79,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     8 => {
                         b.iter(|| {
-                            rb_okvs::encode::<8, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<8, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -85,7 +87,7 @@ fn bench_encode(c: &mut Criterion) {
                     }
                     9 => {
                         b.iter(|| {
-                            rb_okvs::encode::<9, _, OkvsValueU64Array<WIDTH>>(
+                            rb_okvs::encode::<9, _, OkvsValueU128Array<WIDTH>>(
                                 &kvs[..1 << input_log_usize],
                                 epsilon_percent,
                             )
@@ -129,49 +131,49 @@ fn bench_decode(c: &mut Criterion) {
                 // We know W will range between 4 and 9.
                 match w {
                     3 => {
-                        let c = rb_okvs::encode::<3, _, OkvsValueU64Array<2>>(
+                        let c = rb_okvs::encode::<3, _, OkvsValueU128Array<2>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     4 => {
-                        let c = rb_okvs::encode::<4, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<4, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     5 => {
-                        let c = rb_okvs::encode::<5, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<5, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     6 => {
-                        let c = rb_okvs::encode::<6, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<6, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     7 => {
-                        let c = rb_okvs::encode::<7, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<7, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     8 => {
-                        let c = rb_okvs::encode::<8, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<8, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );
                         b.iter(|| c.decode(first_key));
                     }
                     9 => {
-                        let c = rb_okvs::encode::<9, _, OkvsValueU64Array<WIDTH>>(
+                        let c = rb_okvs::encode::<9, _, OkvsValueU128Array<WIDTH>>(
                             &kvs[..1 << input_log_usize],
                             epsilon_percent,
                         );

@@ -1,9 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-use aes::cipher::typenum::Bit;
-
 use crate::{
-    dpf::{BitSlice, BitVec},
+    utils::{BitSlice, BitVec},
     BITS_OF_SECURITY,
 };
 
@@ -168,7 +166,7 @@ impl<'a> Iterator for BinaryTrieDepthIter<'a> {
 #[cfg(test)]
 mod test {
     use super::BinaryTrie;
-    use crate::dpf::BitVec;
+    use crate::utils::BitVec;
 
     #[test]
     fn trie_test() {

@@ -5,11 +5,11 @@ use aes_prng::AesRng;
 
 use crate::dpf::convert_into;
 use crate::dpf::tree_and_leaf_depth;
-use crate::dpf::BitVec;
 use crate::dpf::EvalAllResult;
-use crate::dpf::ExpandedNode;
-use crate::dpf::Node;
 use crate::trie::BinaryTrie;
+use crate::utils::BitVec;
+use crate::utils::ExpandedNode;
+use crate::utils::Node;
 
 use super::BITS_OF_SECURITY;
 
@@ -490,9 +490,7 @@ mod test {
     use rand::{thread_rng, RngCore};
 
     use crate::{
-        big_state::BigStateDpfKey,
-        dpf::{int_to_bits, BitVec, Node},
-        BITS_OF_SECURITY,
+        big_state::BigStateDpfKey, dpf::int_to_bits, utils::BitVec, utils::Node, BITS_OF_SECURITY,
     };
 
     #[test]

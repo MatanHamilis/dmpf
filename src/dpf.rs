@@ -1,390 +1,99 @@
+use rb_okvs::OkvsValueU128Array;
+
 use super::BITS_OF_SECURITY;
-use super::BYTES_OF_SECURITY;
+use crate::prg::double_prg;
 use crate::prg::many_prg;
-use rand::{CryptoRng, RngCore};
-use std::cmp::Ordering;
-use std::ops::{BitXor, BitXorAssign};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, Hash)]
-pub struct Node(u128);
-impl From<u128> for Node {
-    fn from(value: u128) -> Self {
-        Self(value)
-    }
-}
-impl From<Node> for u128 {
-    fn from(value: Node) -> Self {
-        value.0
-    }
-}
-impl AsRef<u128> for Node {
-    fn as_ref(&self) -> &u128 {
-        &self.0
-    }
-}
-
-impl Node {
-    pub fn zero(&mut self) {
-        self.0 = 0;
-    }
-    pub fn pop_first_two_bits(&mut self) -> (bool, bool) {
-        let output = self.0 & 1 == 1;
-        let output_2 = self.0 & 2 == 2;
-        self.0 &= !3u128;
-        // let v = self.0.overflowing_shr(1).0;
-        // let v = v.overflowing_shr(1).0;
-        // self.0 = v;
-        (output, output_2)
-    }
-    pub fn push_first_two_bits(&mut self, bit_1: bool, bit_2: bool) {
-        let first = bit_1 as u128;
-        let second = (bit_2 as u128) << 1;
-        self.0 = (self.0) ^ first ^ second;
-    }
-    pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
-        let mut output = Node::default();
-        output.fill(rng);
-        output
-    }
-    pub fn fill(&mut self, mut rng: impl RngCore + CryptoRng) {
-        let ptr = self.as_mut();
-        rng.fill_bytes(ptr);
-    }
-    pub fn shl(&mut self, amount: u32) {
-        self.0 = self.0.overflowing_shl(amount).0;
-    }
-    pub fn shr(&mut self, amount: u32) {
-        self.0 = self.0.overflowing_shr(amount).0;
-    }
-    pub fn get_bit(&self, index: usize) -> bool {
-        let index = 127 - index;
-        self.0 >> index & 1 == 1
-    }
-
-    pub fn set_bit(&mut self, index: usize, value: bool) {
-        // let (cell, bit) = Self::coordinates(index);
-        let index = 127 - index;
-        let mask: u128 = !(1 << index);
-        self.0 = (self.0 & mask) ^ ((value as u128) << index)
-    }
-    pub fn toggle_bit(&mut self, index: usize) {
-        // let (cell, bit) = Self::coordinates(index);
-        let index = 127 - index;
-        self.0 ^= 1 << index;
-    }
-    pub fn mask(&mut self, bits: usize) {
-        let mask = ((1u128 << bits) - 1) << ((BITS_OF_SECURITY - bits) & (BITS_OF_SECURITY - 1));
-        self.0 &= mask;
-    }
-    pub fn cmp_first_bits(&self, other: &Self, i: usize) -> Ordering {
-        if i >= BITS_OF_SECURITY {
-            return self.cmp(other);
-        }
-        let mask = (1 << i) - 1;
-        let self_first = self.0 & mask;
-        let other_first = other.0 & mask;
-        self_first.cmp(&other_first)
-    }
-}
-impl PartialOrd for Node {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-impl Default for Node {
-    fn default() -> Self {
-        Self(0u128)
-    }
-}
-
-impl BitXor<&Node> for &Node {
-    type Output = Node;
-    fn bitxor(self, rhs: &Node) -> Self::Output {
-        Node(self.0 ^ rhs.0)
-    }
-}
-impl BitXorAssign<&Node> for Node {
-    fn bitxor_assign(&mut self, rhs: &Node) {
-        self.0 ^= rhs.0;
-    }
-}
-impl AsRef<[u8; 16]> for Node {
-    fn as_ref(&self) -> &[u8; 16] {
-        unsafe {
-            (&self.0 as *const u128 as *const [u8; 16])
-                .as_ref()
-                .unwrap()
-        }
-    }
-}
-impl AsMut<[u8]> for Node {
-    fn as_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(&mut self.0 as *mut u128 as *mut u8, BYTES_OF_SECURITY)
-        }
-    }
-}
-#[derive(Clone)]
-pub struct ExpandedNode {
-    nodes: Box<[Node]>,
-}
-impl ExpandedNode {
-    pub fn new(non_zero_point_count: usize) -> Self {
-        let node_count = 2 + 2 * ((non_zero_point_count + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY);
-        ExpandedNode {
-            nodes: Box::from(vec![Node::default(); node_count]),
-        }
-    }
-    pub fn fill_all(&mut self, node: &Node) {
-        many_prg(node, 0..self.nodes.len() as u16, &mut self.nodes);
-    }
-    pub fn fill(&mut self, node: &Node, direction: bool) {
-        let start = direction as u16;
-        let end = start + self.nodes.len() as u16 - 1;
-        many_prg(
-            node,
-            start..end,
-            &mut self.nodes[start as usize..end as usize],
-        );
-    }
-    pub fn get_bit(&self, idx: usize, direction: bool) -> bool {
-        let bits = self.get_bits_direction(direction);
-        let node = idx / BITS_OF_SECURITY;
-        let bit_idx = idx & (BITS_OF_SECURITY - 1);
-        bits[node].get_bit(bit_idx)
-    }
-    pub fn get_node(&self, direction: bool) -> &Node {
-        &self.nodes[(direction as usize) * (self.nodes.len() - 1)]
-    }
-    pub fn get_node_mut(&mut self, direction: bool) -> &mut Node {
-        &mut self.nodes[(direction as usize) * (self.nodes.len() - 1)]
-    }
-    pub fn get_bits(&self) -> &[Node] {
-        &self.nodes[1..self.nodes.len() - 1]
-    }
-    pub fn get_bits_mut(&mut self) -> &mut [Node] {
-        let len = self.nodes.len();
-        &mut self.nodes[1..len - 1]
-    }
-    pub fn get_bits_direction(&self, direction: bool) -> &[Node] {
-        let direction_len = (self.nodes.len() - 2) / 2;
-        let node = 1 + (direction as usize) * direction_len;
-        &self.nodes[node..node + direction_len]
-    }
-}
-#[derive(Clone, PartialEq, Eq, Debug, Hash, PartialOrd)]
-pub struct BitVec {
-    v: Box<[Node]>,
-    len: usize,
-}
-impl AsRef<[Node]> for BitVec {
-    fn as_ref(&self) -> &[Node] {
-        &self.v
-    }
-}
-impl AsMut<[Node]> for BitVec {
-    fn as_mut(&mut self) -> &mut [Node] {
-        &mut self.v
-    }
-}
-// Lexicographic ordering
-impl Ord for BitVec {
-    fn cmp(&self, other: &Self) -> Ordering {
-        for (me_cell, other_cell) in self.v.iter().zip(other.v.iter()) {
-            match me_cell.cmp(other_cell) {
-                Ordering::Equal => continue,
-                n @ _ => return n,
-            }
-        }
-        return self.len.cmp(&other.len);
-    }
-}
-
-impl BitVec {
-    pub fn fill(&mut self, nodes: &[Node]) {
-        self.v.copy_from_slice(nodes);
-        // self.normalize();
-    }
-    pub fn new(len: usize) -> Self {
-        let nodes = (len + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-        let v = vec![Node::default(); nodes].into();
-        BitVec { v, len }
-    }
-    pub fn fill_random(&mut self, mut rng: impl RngCore + CryptoRng) {
-        self.v.iter_mut().for_each(|v| v.fill(&mut rng));
-        self.normalize();
-    }
-    pub fn zero(&mut self) {
-        self.v.iter_mut().for_each(|v| {
-            v.0 = 0;
-        });
-    }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    fn coordinates(index: usize) -> (usize, usize) {
-        (index / BITS_OF_SECURITY, index & (BITS_OF_SECURITY - 1))
-    }
-    pub fn get(&self, index: usize) -> bool {
-        let (cell, idx) = Self::coordinates(index);
-        self.v[cell].get_bit(idx)
-    }
-    pub fn set(&mut self, index: usize, val: bool) {
-        let (cell, idx) = Self::coordinates(index);
-        self.v[cell].set_bit(idx, val);
-    }
-    pub(crate) fn normalize(&mut self) {
-        let bits_to_leave = self.len & (BITS_OF_SECURITY - 1);
-        let bits_to_leave = ((bits_to_leave + BITS_OF_SECURITY - 1) % BITS_OF_SECURITY) + 1;
-        self.v.last_mut().unwrap().mask(bits_to_leave);
-    }
-}
-impl<'a> From<&'a BitVec> for BitSlice<'a> {
-    fn from(value: &'a BitVec) -> Self {
-        Self::new(value.len(), &value.as_ref())
-    }
-}
-impl<'a> PartialOrd for BitSlice<'a> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.len() != other.len() {
-            return None;
-        }
-        for (self_node, node) in self.v.iter().zip(other.v.iter()) {
-            match self_node.cmp(node) {
-                Ordering::Equal => continue,
-                result @ _ => return Some(result),
-            }
-        }
-        Some(Ordering::Equal)
-    }
-}
-#[derive(Debug, PartialEq, Eq)]
-pub struct BitSliceMut<'a> {
-    v: &'a mut [Node],
-    len: usize,
-}
-impl<'a> BitSliceMut<'a> {
-    pub fn new(len: usize, v: &'a mut [Node]) -> Self {
-        BitSliceMut { v: v.as_mut(), len }
-    }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    pub fn get(&self, index: usize) -> bool {
-        let (cell, idx) = BitVec::coordinates(index);
-        self.v[cell].get_bit(idx)
-    }
-    pub fn set(&mut self, index: usize, val: bool) {
-        let (cell, idx) = BitVec::coordinates(index);
-        self.v[cell].set_bit(idx, val);
-    }
-}
-impl<'a> AsMut<[Node]> for BitSliceMut<'a> {
-    fn as_mut(&mut self) -> &mut [Node] {
-        self.v
-    }
-}
-impl<'a> BitXorAssign<&BitSliceMut<'a>> for BitSliceMut<'a> {
-    fn bitxor_assign(&mut self, rhs: &BitSliceMut<'a>) {
-        assert_eq!(self.len, rhs.len);
-        for i in 0..self.v.len() {
-            self.v[i].bitxor_assign(&rhs.v[i]);
-        }
-    }
-}
-impl<'a> BitXorAssign<&BitVec> for BitSliceMut<'a> {
-    fn bitxor_assign(&mut self, rhs: &BitVec) {
-        assert_eq!(self.len, rhs.len);
-        for i in 0..self.v.len() {
-            self.v[i].bitxor_assign(&rhs.v[i]);
-        }
-    }
-}
-impl<'a> From<&'a mut BitVec> for BitSliceMut<'a> {
-    fn from(value: &'a mut BitVec) -> Self {
-        Self {
-            v: &mut value.v,
-            len: value.len,
-        }
-    }
-}
-#[derive(Debug, PartialEq, Eq)]
-pub struct BitSlice<'a> {
-    v: &'a [Node],
-    len: usize,
-}
-impl<'a> BitSlice<'a> {
-    pub fn new(len: usize, v: &'a [Node]) -> Self {
-        BitSlice { v: v.as_ref(), len }
-    }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    pub fn get(&self, index: usize) -> bool {
-        let (cell, idx) = BitVec::coordinates(index);
-        self.v[cell].get_bit(idx)
-    }
-}
-
-impl From<&[bool]> for BitVec {
-    fn from(v: &[bool]) -> Self {
-        let bit_len = v.len();
-        let len = (v.len() + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-        let mut output = Vec::with_capacity(len);
-        for chunk in v.chunks(BITS_OF_SECURITY) {
-            let mut node = Node::default();
-            for (idx, &bit) in chunk.iter().enumerate() {
-                node.set_bit(idx, bit);
-            }
-            output.push(node);
-        }
-        Self {
-            v: output.into(),
-            len: bit_len,
-        }
-    }
-}
-impl From<(&[Node], usize)> for BitVec {
-    fn from(value: (&[Node], usize)) -> Self {
-        let v = value.0.to_vec();
-        Self {
-            v: v.into(),
-            len: value.1,
-        }
-    }
-}
-
-impl BitXorAssign<&BitVec> for BitVec {
-    fn bitxor_assign(&mut self, rhs: &BitVec) {
-        assert_eq!(self.len, rhs.len);
-        for i in 0..self.v.len() {
-            self.v[i].bitxor_assign(&rhs.v[i]);
-        }
-    }
-}
+use crate::prg::DOUBLE_PRG_CHILDREN;
+use crate::utils::BitSlice;
+use crate::utils::BitSliceMut;
+use crate::utils::BitVec;
+use crate::utils::ExpandedNode;
+use crate::utils::Node;
+use crate::Dmpf;
+use crate::DmpfKey;
+use std::ops::BitXorAssign;
 
 #[derive(Clone, Copy)]
 pub struct CorrectionWord {
     node: Node,
-    bits: u8,
 }
-pub struct DpfKey {
+pub struct DpfDmpf<const WIDTH: usize> {
+    input_len: usize,
+}
+impl<const WIDTH: usize> Dmpf for DpfDmpf<WIDTH> {
+    type Key = DpfDmpfKey<WIDTH>;
+    fn try_gen<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(
+        &self,
+        inputs: &[(
+            <Self::Key as crate::DmpfKey>::InputContainer,
+            <Self::Key as crate::DmpfKey>::OutputContainer,
+        )],
+        mut rng: &mut R,
+    ) -> Option<(Self::Key, Self::Key)> {
+        let mut first_keys = Vec::with_capacity(inputs.len());
+        let mut second_keys = Vec::with_capacity(inputs.len());
+        inputs.iter().for_each(|(k, v)| {
+            let roots = (Node::random(&mut rng), Node::random(&mut rng));
+            let (f, s) = DpfKey::gen(&roots, k, self.input_len, v);
+            first_keys.push(f);
+            second_keys.push(s);
+        });
+        Some((
+            DpfDmpfKey {
+                dpf_keys: first_keys,
+            },
+            DpfDmpfKey {
+                dpf_keys: second_keys,
+            },
+        ))
+    }
+}
+pub struct DpfDmpfKey<const WIDTH: usize> {
+    dpf_keys: Vec<DpfKey<WIDTH>>,
+}
+impl<const WIDTH: usize> DmpfKey for DpfDmpfKey<WIDTH> {
+    type InputContainer = OkvsValueU128Array<1>;
+    type OutputContainer = OkvsValueU128Array<WIDTH>;
+    type Session = ();
+    fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
+        *output = OkvsValueU128Array::default();
+        self.dpf_keys.iter().for_each(|k| {
+            let mut cur_out = [Node::default(); WIDTH];
+            k.eval(input, &mut cur_out);
+            *output ^= OkvsValueU128Array::from(core::array::from_fn(|i| cur_out[i].into()));
+        });
+    }
+    fn make_session(&self) -> Self {
+        unimplemented!()
+    }
+    fn eval_all(&self) -> Box<[Self::OutputContainer]> {
+        let mut f: Vec<OkvsValueU128Array<WIDTH>> = self.dpf_keys[0]
+            .eval_all()
+            .into_iter()
+            .map(|v| core::array::from_fn(|i| v[i].into()).into())
+            .collect();
+        self.dpf_keys[1..].iter().for_each(|k| {
+            f.iter_mut()
+                .zip(k.eval_all().into_iter())
+                .for_each(|(o, i)| {
+                    *o = core::array::from_fn(|idx| o[idx] ^ u128::from(i[idx])).into();
+                })
+        });
+        f.into()
+    }
+}
+pub struct DpfKey<const WIDTH: usize> {
     root: Node,
     root_bit: bool,
     cws: Vec<CorrectionWord>,
-    last_cw: BitVec,
+    last_cw: [Node; WIDTH],
     input_bits: usize,
     output_bits: usize,
 }
 impl CorrectionWord {
-    fn get_bit(&self, direction: bool) -> bool {
-        self.bits & (1 << (direction as u8)) != 0
-    }
-    fn new(node: Node, left_bit: bool, right_bit: bool) -> Self {
-        Self {
-            node,
-            bits: (left_bit as u8) + 2 * (right_bit as u8),
-        }
+    fn new(mut node: Node, left_bit: bool, right_bit: bool) -> Self {
+        node.push_first_two_bits(left_bit, right_bit);
+        Self { node }
     }
 }
 pub(crate) fn tree_and_leaf_depth(alpha_len: usize, beta_len: usize) -> (usize, usize) {
@@ -417,32 +126,31 @@ pub(crate) fn convert_into(node: &Node, output: &mut [Node]) {
         output[0] = *node;
     }
 }
-impl DpfKey {
-    pub fn gen(roots: &(Node, Node), alpha: &BitVec, beta: &BitVec) -> (DpfKey, DpfKey) {
+impl<const WIDTH: usize> DpfKey<WIDTH> {
+    pub fn gen(
+        roots: &(Node, Node),
+        alpha: &OkvsValueU128Array<1>,
+        input_len: usize,
+        beta: &OkvsValueU128Array<WIDTH>,
+    ) -> (DpfKey<WIDTH>, DpfKey<WIDTH>) {
         let mut t_0 = false;
         let mut t_1 = true;
-        let mut expanded_node_0 = ExpandedNode::new(1);
-        let mut expanded_node_1 = ExpandedNode::new(1);
         let mut seed_0 = roots.0;
         let mut seed_1 = roots.1;
-        let (tree_depth, leaf_depth) = tree_and_leaf_depth(alpha.len(), beta.len());
-        let mut cws = Vec::with_capacity(tree_depth);
-        for i in 0..tree_depth {
-            expanded_node_0.fill_all(&seed_0);
-            expanded_node_1.fill_all(&seed_1);
-            let path_bit = alpha.get(i);
-            let t_l_0 = expanded_node_0.get_bit(0, false);
-            let t_l_1 = expanded_node_1.get_bit(0, false);
-            let t_r_0 = expanded_node_0.get_bit(0, true);
-            let t_r_1 = expanded_node_1.get_bit(0, true);
-            let bit_left = !(t_l_0 ^ t_l_1 ^ path_bit);
-            let bit_right = t_r_0 ^ t_r_1 ^ path_bit;
-            expanded_node_0
-                .get_node_mut(!path_bit)
-                .bitxor_assign(expanded_node_1.get_node(!path_bit));
-            seed_0 = *expanded_node_0.get_node(path_bit);
-            seed_1 = *expanded_node_1.get_node(path_bit);
-            let cw_node = *expanded_node_0.get_node(!path_bit);
+        let mut cws = Vec::with_capacity(input_len);
+        for i in 0..input_len {
+            let [mut seeds_l_0, mut seeds_r_0] = double_prg(&seed_0, &DOUBLE_PRG_CHILDREN);
+            let [mut seeds_l_1, mut seeds_r_1] = double_prg(&seed_1, &DOUBLE_PRG_CHILDREN);
+            let path_bit = alpha.get_bit(i);
+            let (t_l_0, _) = seeds_l_0.pop_first_two_bits();
+            let (t_l_1, _) = seeds_l_1.pop_first_two_bits();
+            let (t_r_0, _) = seeds_r_0.pop_first_two_bits();
+            let (t_r_1, _) = seeds_r_1.pop_first_two_bits();
+            let diff_bit_left = !(t_l_0 ^ t_l_1 ^ path_bit);
+            let diff_bit_right = t_r_0 ^ t_r_1 ^ path_bit;
+            let cw_node = [seeds_l_0 ^ seeds_l_1, seeds_r_0 ^ seeds_r_1][!path_bit as usize];
+            seed_0 = [seeds_l_0, seeds_r_0][path_bit as usize];
+            seed_1 = [seeds_l_1, seeds_r_1][path_bit as usize];
             if t_0 {
                 seed_0 ^= &cw_node;
             }
@@ -450,149 +158,100 @@ impl DpfKey {
                 seed_1 ^= &cw_node;
             }
             (t_0, t_1) = if path_bit {
-                (t_r_0 ^ (t_0 & bit_right), t_r_1 ^ (t_1 & bit_right))
+                (
+                    t_r_0 ^ (t_0 & diff_bit_right),
+                    t_r_1 ^ (t_1 & diff_bit_right),
+                )
             } else {
-                (t_l_0 ^ (t_0 & bit_left), t_l_1 ^ (t_1 & bit_left))
+                (t_l_0 ^ (t_0 & diff_bit_left), t_l_1 ^ (t_1 & diff_bit_left))
             };
-            cws.push(CorrectionWord::new(cw_node, bit_left, bit_right));
+            cws.push(CorrectionWord::new(cw_node, diff_bit_left, diff_bit_right));
         }
-        let mut last_cw = BitVec::new(beta.len() << leaf_depth);
-        let pos_in_subtree = {
-            let mut pos = 0;
-            for i in tree_depth..alpha.len() {
-                pos <<= 1;
-                if alpha.get(i) {
-                    pos ^= 1;
-                }
-            }
-            pos
-        };
-        let start = pos_in_subtree * beta.len();
-        for j in 0..beta.len() {
-            let bit = beta.get(j);
-            last_cw.set(start + j, bit);
-        }
-        let mut conv = convert(&seed_0, beta.len() << leaf_depth);
-        last_cw.bitxor_assign(&conv);
-        convert_into(&seed_1, &mut conv.as_mut());
-        last_cw.bitxor_assign(&conv);
+        let mut conv_0 = [Node::default(); WIDTH];
+        let mut conv_1 = [Node::default(); WIDTH];
+        convert_into(&seed_0, &mut conv_0);
+        convert_into(&seed_1, &mut conv_1);
+        let last_cw: [Node; WIDTH] =
+            core::array::from_fn(|i| conv_0[i] ^ conv_1[i] ^ beta[i].into());
         let first_key = DpfKey {
             root: roots.0,
             root_bit: false,
             cws: cws.clone(),
-            last_cw: last_cw.clone(),
-            input_bits: alpha.len(),
-            output_bits: beta.len(),
+            last_cw: last_cw.into(),
+            input_bits: input_len,
+            output_bits: WIDTH * 128,
         };
         let second_key = DpfKey {
             root: roots.1,
             root_bit: true,
             cws,
-            last_cw,
-            input_bits: alpha.len(),
-            output_bits: beta.len(),
+            last_cw: last_cw.into(),
+            input_bits: input_len,
+            output_bits: WIDTH * 128,
         };
         (first_key, second_key)
     }
-    pub fn eval(&self, x: &BitSlice, output: &mut BitSliceMut) {
-        assert_eq!(x.len(), self.input_bits);
-        assert_eq!(output.len(), self.output_bits);
-
+    pub fn eval(&self, x: &OkvsValueU128Array<1>, output: &mut [Node; WIDTH]) {
         let mut t = self.root_bit;
         let mut s = self.root;
-        let mut ex_node = ExpandedNode::new(1);
         for (idx, cw) in self.cws.iter().enumerate() {
-            let path_bit = x.get(idx);
-            ex_node.fill_all(&s);
-            s = *ex_node.get_node(path_bit);
+            let path_bit = x.get_bit(idx);
+            let seeds = double_prg(&s, &DOUBLE_PRG_CHILDREN);
+            s = seeds[path_bit as usize];
+            let (mut new_t, _) = s.pop_first_two_bits();
             if t {
-                s ^= &cw.node;
+                let mut cw = cw.node;
+                let (left_bit, right_bit) = cw.pop_first_two_bits();
+                s ^= &cw;
+                new_t ^= (left_bit & !path_bit) ^ (right_bit & path_bit);
             }
-            let (new_t, t_corr) = (ex_node.get_bit(0, path_bit), cw.get_bit(path_bit));
-            t = new_t ^ (t & t_corr);
+            t = new_t;
         }
-        if x.len() > self.cws.len() {
-            let levels_packed = x.len() - self.cws.len();
-            let mut bs = BitVec::new(self.output_bits << levels_packed);
-            convert_into(&s, &mut bs.as_mut());
-            if t {
-                bs.bitxor_assign(&self.last_cw);
-            }
-            let idx_in_block = {
-                let mut pos = 0;
-                for i in self.cws.len()..x.len() {
-                    pos <<= 1;
-                    pos ^= (x.get(i)) as usize;
-                }
-                pos
-            };
-            let start = idx_in_block * self.output_bits;
-            for i in 0..self.output_bits {
-                output.set(i, bs.get(start + i));
-            }
-        } else {
-            convert_into(&s, output.as_mut());
-            if t {
-                output.bitxor_assign(&self.last_cw);
-            }
+        convert_into(&s, output.as_mut());
+        if t {
+            *output = core::array::from_fn(|i| output[i] ^ self.last_cw[i]);
         }
     }
-    pub fn eval_all(&self) -> EvalAllResult {
-        let (tree_depth, leaf_depth) = tree_and_leaf_depth(self.input_bits, self.output_bits);
-        let blocks_per_output = (self.output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY;
-        let total_items = 1 << (self.input_bits - leaf_depth);
-        let mut output_vec = Vec::with_capacity(total_items);
-        let mut output_container = BitVec::new(self.output_bits << leaf_depth);
-        let mut t = self.root_bit;
-        let mut s = self.root;
-        let mut expanded_node = ExpandedNode::new(1);
-
-        let mut next_directions = Vec::with_capacity(self.input_bits - leaf_depth);
-        'outer: loop {
-            let depth = next_directions.len();
-            if depth == tree_depth {
-                convert_into(&s, &mut output_container.as_mut());
+    pub fn eval_all(&self) -> Vec<[Node; WIDTH]> {
+        let mut cur_seeds = vec![self.root];
+        let mut cur_signs = vec![self.root_bit];
+        for depth in 0..self.input_bits {
+            let mut next_seeds = Vec::with_capacity(1 << (depth + 1));
+            let mut next_signs = Vec::with_capacity(1 << (depth + 1));
+            let mut cur_cw = self.cws[depth].node;
+            let (cw_t_l, cw_t_r) = cur_cw.pop_first_two_bits();
+            for (s, t) in cur_seeds.iter().copied().zip(cur_signs.iter().copied()) {
+                let [mut seed_l, mut seed_r] = double_prg(&s, &DOUBLE_PRG_CHILDREN);
+                let (mut t_l, _) = seed_l.pop_first_two_bits();
+                let (mut t_r, _) = seed_r.pop_first_two_bits();
                 if t {
-                    output_container.bitxor_assign(&self.last_cw);
+                    seed_l ^= &cur_cw;
+                    seed_r ^= &cur_cw;
+                    t_l ^= cw_t_l;
+                    t_r ^= cw_t_r;
                 }
-                output_container.v.iter().for_each(|v| output_vec.push(*v));
-                loop {
-                    let (dir, t_r, s_r): (bool, bool, Node) = match next_directions.pop() {
-                        None => break 'outer,
-                        Some(tuple) => tuple,
-                    };
-                    if !dir {
-                        // We finished left, go to right
-                        t = t_r;
-                        s = s_r;
-                        next_directions.push((true, t, s));
-                        break;
-                    }
-                    // Otherwise we finished right, keep going up
-                }
-            } else {
-                expanded_node.fill_all(&s);
-                let mut s_l = *expanded_node.get_node(false);
-                let mut s_r = *expanded_node.get_node(true);
-                let mut t_l = expanded_node.get_bit(0, false);
-                let mut t_r = expanded_node.get_bit(0, true);
-                if t {
-                    s_l ^= &self.cws[depth].node;
-                    s_r ^= &self.cws[depth].node;
-                    t_l ^= self.cws[depth].get_bit(false);
-                    t_r ^= self.cws[depth].get_bit(true);
-                }
-                next_directions.push((false, t_r, s_r));
-                s = s_l;
-                t = t_l;
+                next_seeds.push(seed_l);
+                next_seeds.push(seed_r);
+                next_signs.push(t_l);
+                next_signs.push(t_r);
             }
+            cur_seeds = next_seeds;
+            cur_signs = next_signs;
         }
-        EvalAllResult {
-            nodes: output_vec,
-            output_bits: self.output_bits,
-            outputs_per_block: 1 << leaf_depth,
-            blocks_per_output,
-        }
+        let last_cw = self.last_cw;
+        cur_seeds
+            .into_iter()
+            .zip(cur_signs.into_iter())
+            .map(|(s, t)| {
+                let mut my_last_cw = [Node::default(); WIDTH];
+                convert_into(&s, &mut my_last_cw);
+                if t {
+                    core::array::from_fn(|i| my_last_cw[i] ^ last_cw[i])
+                } else {
+                    my_last_cw
+                }
+            })
+            .collect()
     }
 }
 pub struct EvalAllResult {
@@ -637,89 +296,42 @@ pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {
 }
 #[cfg(test)]
 mod tests {
-    use std::ops::BitXorAssign;
-
-    use aes_prng::AesRng;
     use rand::{thread_rng, RngCore};
+    use rb_okvs::OkvsValueU128Array;
 
-    use crate::dpf::{int_to_bits, BitVec};
+    use crate::random_u128;
 
     use super::{DpfKey, Node};
 
     #[test]
     fn test_dpf() {
-        const DEPTH: usize = 10;
-        const OUTPUT_WIDTH: usize = 2;
+        const DEPTH: usize = 2;
         let mut rng = thread_rng();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
         let roots = (root_0, root_1);
-        let alpha_idx = (rng.next_u32() as usize) & ((1 << DEPTH) - 1);
-        let alpha: Vec<_> = int_to_bits(alpha_idx, DEPTH);
-        let alpha_v = BitVec::from(&alpha[..]);
-        let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
-        let beta_bitvec = BitVec::from(&beta[..]);
-        let (k_0, k_1) = DpfKey::gen(&roots, &alpha_v, &beta_bitvec);
-        let mut output_0 = BitVec::new(OUTPUT_WIDTH);
-        let mut output_1 = BitVec::new(OUTPUT_WIDTH);
+        let point = (rng.next_u64() & ((1 << DEPTH) - 1)) as u128;
+        let alpha_idx = [point << (128 - DEPTH)].into();
+        let beta = [random_u128(&mut rng); 2].into();
+        let (k_0, k_1) = DpfKey::gen(&roots, &alpha_idx, DEPTH, &beta);
+        let eval_all_0 = k_0.eval_all();
+        let eval_all_1 = k_1.eval_all();
         for i in 0usize..1 << DEPTH {
-            let bits_i = int_to_bits(i, DEPTH);
-            let input = BitVec::from(&bits_i[..]);
-            let bs_output_0 = &mut output_0;
-            let bs_output_1 = &mut output_1;
-            k_0.eval(&(&input).into(), &mut (bs_output_0).into());
-            k_1.eval(&(&input).into(), &mut (bs_output_1).into());
-            if i != alpha_idx {
+            let input = [(i as u128) << (128 - DEPTH)].into();
+            let mut bs_output_0 = [Node::default(); 2];
+            let mut bs_output_1 = [Node::default(); 2];
+            k_0.eval(&input, &mut bs_output_0);
+            k_1.eval(&input, &mut bs_output_1);
+            assert_eq!(bs_output_0, eval_all_0[i]);
+            assert_eq!(bs_output_1, eval_all_1[i]);
+            if (i as u128) != point {
                 assert_eq!(&bs_output_0, &bs_output_1);
             }
-            if i == alpha_idx {
-                output_0.bitxor_assign(&output_1);
-                assert_eq!(output_0, beta_bitvec);
+            if (i as u128) == point {
+                let bs_output: OkvsValueU128Array<2> =
+                    core::array::from_fn(|i| u128::from(bs_output_0[i] ^ bs_output_1[i])).into();
+                assert_eq!(bs_output, beta);
             }
-        }
-    }
-
-    #[test]
-    fn test_dpf_evalall() {
-        const DEPTH: usize = 8;
-        const OUTPUT_WIDTH: usize = 3;
-        let mut rng = AesRng::from_random_seed();
-        let root_0 = Node::random(&mut rng);
-        let root_1 = Node::random(&mut rng);
-        let roots = (root_0, root_1);
-        let alpha_idx = (rng.next_u32() as usize) & ((1 << DEPTH) - 1);
-        let alpha: Vec<_> = int_to_bits(alpha_idx, DEPTH);
-        let alpha_v = BitVec::from(&alpha[..]);
-        let beta: Vec<bool> = (0..OUTPUT_WIDTH).map(|_| rng.next_u32() & 1 == 1).collect();
-        let beta_bitvec = BitVec::from(&beta[..]);
-        let (k_0, k_1) = DpfKey::gen(&roots, &alpha_v, &beta_bitvec);
-        let ev_all_0 = k_0.eval_all();
-        let ev_all_1 = k_1.eval_all();
-        let mut output_0 = vec![Node::default(); ev_all_0.blocks_per_output];
-        let mut output_1 = vec![Node::default(); ev_all_1.blocks_per_output];
-        for i in 0usize..1 << DEPTH {
-            ev_all_0.get_item(i, &mut output_0);
-            ev_all_1.get_item(i, &mut output_1);
-            if i != alpha_idx {
-                assert_eq!(output_0, output_1);
-            } else {
-                output_0
-                    .iter_mut()
-                    .zip(output_1.iter())
-                    .for_each(|(output, input)| output.bitxor_assign(input));
-                assert_eq!(output_0, beta_bitvec.as_ref());
-            }
-        }
-    }
-    #[test]
-    fn test_bitvec_comparison() {
-        const DEPTH: usize = 3;
-        for i in 1..1 << DEPTH {
-            let cur = int_to_bits(i, DEPTH);
-            let prev = int_to_bits(i - 1, DEPTH);
-            let cur_bv = BitVec::from(&cur[..]);
-            let prev_bv = BitVec::from(&prev[..]);
-            assert!(cur_bv > prev_bv);
         }
     }
 }
