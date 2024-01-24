@@ -75,7 +75,7 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
                 let roots = (Node::random(&mut rng), Node::random(&mut rng));
                 let alpha = OkvsValueU128Array::default();
                 let beta = OkvsValueU128Array::default();
-                DpfKey::gen(&roots, &alpha, self.input_domain_log_size, &beta)
+                DpfKey::gen(&roots, &alpha, dpf_input_length, &beta)
             })
             .collect();
         for (index, (bucket, index_in_bucket)) in encoding {
@@ -84,7 +84,7 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
             alpha[0] = ((index_in_bucket as u128) << (128 - dpf_input_length)).into();
             let beta = value;
             let roots = (Node::random(&mut rng), Node::random(&mut rng));
-            dpfs[bucket] = DpfKey::gen(&roots, &alpha, self.input_domain_log_size, &beta);
+            dpfs[bucket] = DpfKey::gen(&roots, &alpha, dpf_input_length, &beta);
         }
         let (dpfs_0, dpfs_1): (Vec<_>, Vec<_>) = dpfs.into_iter().unzip();
         let (_, hash_functions) = gen_hash_functions::<AesRng>(
@@ -123,10 +123,11 @@ impl<const WIDTH: usize> DmpfKey for BatchCodeDmpfKey<WIDTH> {
 
         for f in self.hash_functions.iter() {
             let (bucket, index) = self.hash_functions.eval(input_usize, f);
-            // let node = [Node::from((index as u128) << (128 - self.dpf_input_length))];
+            let dpf_input =
+                OkvsValueU128Array::from([((index as u128) << (128 - self.dpf_input_length))]);
             // let input_bitvec = BitSlice::new(self.dpf_input_length, &node[..]);
             let mut cur_output = [Node::default(); WIDTH];
-            self.buckets[bucket].eval(&input, &mut cur_output);
+            self.buckets[bucket].eval(&dpf_input, &mut cur_output);
             *output = core::array::from_fn(|i| output[i] ^ u128::from(cur_output[i])).into();
         }
     }
@@ -134,15 +135,12 @@ impl<const WIDTH: usize> DmpfKey for BatchCodeDmpfKey<WIDTH> {
         let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
         let input_domain_size = 1 << self.input_domain_log_size;
         let mut output = Vec::with_capacity(input_domain_size);
-        let mut output_node = [Node::default()];
         for i in 0..input_domain_size {
             let mut output_cur = OkvsValueU128Array::<WIDTH>::default();
             for (bucket, bucket_idx) in self.hash_functions.eval_all(i) {
-                dbg!(bucket);
-                dbg!(bucket_idx);
                 let c = dpfs_eval_all[bucket][bucket_idx];
-                for i in 0..WIDTH {
-                    output_cur[i] ^= u128::from(c[i]);
+                for j in 0..WIDTH {
+                    output_cur[j] ^= u128::from(c[j]);
                 }
             }
             output.push(output_cur);
@@ -186,7 +184,6 @@ impl HashFunctionIndex {
     fn eval_all(&self, from: usize) -> impl '_ + Iterator<Item = (usize, usize)> {
         let v = &self.contents
             [self.hash_functions_count * from..self.hash_functions_count * (from + 1)];
-        dbg!(self.bucket_size);
         v.iter()
             .map(|v| (v / self.bucket_size, v % self.bucket_size))
     }
@@ -349,8 +346,8 @@ mod test {
     #[test]
     fn test_batch_code_dmpf() {
         const W: usize = 4;
-        const POINTS: usize = 64;
-        const INPUT_SIZE: usize = 10;
+        const POINTS: usize = 10;
+        const INPUT_SIZE: usize = 4;
         const OUTPUT_SIZE: usize = 127;
         const EXPANSION_OVERHEAD_IN_PERCENT: usize = 50;
         let scheme = BatchCodeDmpf::new(INPUT_SIZE, W, EXPANSION_OVERHEAD_IN_PERCENT);
@@ -372,8 +369,8 @@ mod test {
             let encoded_i = encode_input(i, INPUT_SIZE);
             key_1.eval(&encoded_i, &mut output_1);
             key_2.eval(&encoded_i, &mut output_2);
-            // assert_eq!(output_1, eval_all_1[i]);
-            // assert_eq!(output_2, eval_all_2[i]);
+            assert_eq!(output_1, eval_all_1[i]);
+            assert_eq!(output_2, eval_all_2[i]);
             let output = output_1 ^ output_2;
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
