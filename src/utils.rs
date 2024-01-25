@@ -1,9 +1,11 @@
 use std::{
     cmp::Ordering,
-    ops::{BitXor, BitXorAssign},
+    iter::Sum,
+    ops::{AddAssign, BitXor, BitXorAssign, Div, Mul, SubAssign},
 };
 
 use rand::{CryptoRng, RngCore};
+use rb_okvs::OkvsValue;
 
 use crate::{prg::many_prg, BITS_OF_SECURITY, BYTES_OF_SECURITY};
 
@@ -24,10 +26,70 @@ impl AsRef<u128> for Node {
         &self.0
     }
 }
+impl OkvsValue for Node {
+    fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
+        let mut output = Node::default();
+        output.fill(rng);
+        output
+    }
+    fn is_zero(&self) -> bool {
+        self.0 == 0u128
+    }
+}
+impl Mul for Node {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        assert_eq!(self.0, 1u128);
+        rhs
+    }
+}
+impl AddAssign for Node {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0;
+    }
+}
+impl SubAssign for Node {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0
+    }
+}
+impl From<bool> for Node {
+    fn from(value: bool) -> Self {
+        Node(value as u128)
+    }
+}
+impl Div for Node {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        assert_eq!(rhs.0, 1u128);
+        self
+    }
+}
+impl Sum for Node {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Node::default(), |cur, acc| Node(cur.0 ^ acc.0))
+    }
+}
+impl Mul<bool> for Node {
+    type Output = Self;
+    fn mul(self, rhs: bool) -> Self::Output {
+        Self(self.0 * (rhs as u128))
+    }
+}
+impl BitXorAssign for Node {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0;
+    }
+}
 
 impl Node {
     pub fn zero(&mut self) {
         self.0 = 0;
+    }
+    pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
+        let mut output = Node::default();
+        output.fill(rng);
+        output
     }
     pub fn pop_first_two_bits(&mut self) -> (bool, bool) {
         let output = self.0 & 1 == 1;
@@ -42,11 +104,6 @@ impl Node {
         let first = bit_1 as u128;
         let second = (bit_2 as u128) << 1;
         self.0 = (self.0) ^ first ^ second;
-    }
-    pub fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
-        let mut output = Node::default();
-        output.fill(rng);
-        output
     }
     pub fn fill(&mut self, mut rng: impl RngCore + CryptoRng) {
         let ptr = self.as_mut();

@@ -4,8 +4,7 @@ use std::{
 };
 
 use aes_prng::AesRng;
-use dmpf::Dmpf;
-use field::RadixTwoFftFriendFieldElement;
+use dmpf::RadixTwoFftFriendFieldElement;
 use polynomial::{DensePolynomial, SparsePolynomial};
 use rand::{thread_rng, RngCore, SeedableRng};
 use ring::{ModuloPolynomial, PolynomialRingElement, SparsePolynomialRingElement};
@@ -145,7 +144,5 @@ fn gen<F: RadixTwoFftFriendFieldElement, D: Dmpf, M: ModuloPolynomial<F>>(
     let tensor_product = tensor_product(&first_sparse_polynomials, &second_sparse_polynomials);
     let mut first_tensor_shares = Vec::with_capacity(compression_factor * compression_factor);
     let mut second_tensor_shares = Vec::with_capacity(compression_factor * compression_factor);
-    tensor_product.v.into_iter().map(|p| {
-        
-    })
+    tensor_product.v.into_iter().map(|p| {})
 }

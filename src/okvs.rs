@@ -1,4 +1,4 @@
-use std::{ops::DerefMut, u128};
+use std::{marker::PhantomData, ops::DerefMut, u128};
 
 use rand::{CryptoRng, RngCore};
 use rb_okvs::{EncodedOkvs, EpsilonPercent, OkvsValueU128Array};
@@ -10,13 +10,13 @@ use crate::{
     utils::BitSlice,
     utils::BitVec,
     utils::Node,
-    Dmpf, DmpfKey, BITS_OF_SECURITY,
+    Dmpf, DmpfKey, DpfOutput, BITS_OF_SECURITY,
 };
 
 #[derive(Clone)]
-pub enum Okvs<const W: usize, const OKVS_WIDTH: usize> {
-    InformationTheoretic(InformationTheoreticOkvs<OKVS_WIDTH>),
-    RbOkvs(EncodedOkvs<W, OkvsValueU128Array<1>, OkvsValueU128Array<OKVS_WIDTH>>),
+pub enum Okvs<const W: usize, const OW: usize> {
+    InformationTheoretic(InformationTheoreticOkvs<OW>),
+    RbOkvs(EncodedOkvs<W, OkvsValueU128Array<1>, OkvsValueU128Array<OW>>),
 }
 impl<const W: usize, const OKVS_WIDTH: usize> Okvs<W, OKVS_WIDTH> {
     fn decode(&self, key: &OkvsValueU128Array<1>) -> OkvsValueU128Array<OKVS_WIDTH> {
@@ -26,12 +26,13 @@ impl<const W: usize, const OKVS_WIDTH: usize> Okvs<W, OKVS_WIDTH> {
         }
     }
 }
-pub struct OkvsDmpfKey<const W: usize, const OKVS_WIDTH: usize> {
+pub struct OkvsDmpfKey<const W: usize, const OW: usize, Output: DpfOutput<OW>> {
     seed: Node,
     sign: bool,
     output_len: usize,
     cws: Vec<Okvs<W, 1>>,
-    last_cw: Okvs<W, OKVS_WIDTH>,
+    last_cw: Okvs<W, OW>,
+    _p: PhantomData<Output>,
 }
 
 impl From<OkvsValueU128Array<1>> for Node {
@@ -46,11 +47,11 @@ impl From<Node> for OkvsValueU128Array<1> {
     }
 }
 
-impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WIDTH> {
+impl<const W: usize, const OW: usize, Output: DpfOutput<OW>> DmpfKey<OW, Output>
+    for OkvsDmpfKey<W, OW, Output>
+{
     type Session = ();
-    type InputContainer = OkvsValueU128Array<1>;
-    type OutputContainer = OkvsValueU128Array<OKVS_WIDTH>;
-    fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
+    fn eval(&self, input: &u128, output: &mut Output) {
         let input_length = self.cws.len();
         let mut seed = self.seed;
         let mut sign = self.sign;
@@ -58,7 +59,7 @@ impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WI
         for i in 0..input_length {
             let mut v = input_node;
             v.mask(i);
-            let mut correction_seed = OkvsDmpf::<W, OKVS_WIDTH>::correct(v, sign, &self.cws[i]);
+            let mut correction_seed = OkvsDmpf::<W, OW, Output>::correct(v, sign, &self.cws[i]);
             let (correction_sign_left, correction_sign_right) =
                 correction_seed.pop_first_two_bits();
             let seeds = double_prg(&seed, &DOUBLE_PRG_CHILDREN);
@@ -70,12 +71,12 @@ impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WI
             seed = &correction_seed ^ &seed_prg;
             sign = signs[input_bit_usize] ^ sign_prg;
         }
-        let mut node_output = expand_to_okvs_value::<OKVS_WIDTH>(&seed);
-        node_output ^= OkvsDmpf::conv_correct(input_node, sign, &self.last_cw);
+        let mut node_output = Output::from(u128::from(seed));
+        node_output += OkvsDmpf::conv_correct(input_node, sign, &self.last_cw);
         // node_output.mask(self.output_len);
         *output = node_output;
     }
-    fn eval_all(&self) -> Box<[Self::OutputContainer]> {
+    fn eval_all(&self) -> Vec<Output> {
         let input_length = self.cws.len();
         let mut sign = vec![self.sign];
         let mut seed = vec![self.seed];
@@ -86,7 +87,7 @@ impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WI
             for k in 0..1 << i {
                 let current_node = (k as u128) << bits_left;
                 let mut correction_seed =
-                    OkvsDmpf::<W, OKVS_WIDTH>::correct(current_node.into(), sign[k], &self.cws[i]);
+                    OkvsDmpf::<W, OW, Output>::correct(current_node.into(), sign[k], &self.cws[i]);
                 let (correction_sign_left, correction_sign_right) =
                     correction_seed.pop_first_two_bits();
                 let [mut seed_prg_false, mut seed_prg_true] =
@@ -113,8 +114,8 @@ impl<const W: usize, const OKVS_WIDTH: usize> DmpfKey for OkvsDmpfKey<W, OKVS_WI
             .enumerate()
             .map(|(idx, (seed, sign))| {
                 let input_node = ((idx as u128) << (BITS_OF_SECURITY - input_length)).into();
-                let mut node_output = expand_to_okvs_value(&seed);
-                node_output ^= OkvsDmpf::conv_correct(input_node, sign, last_cw);
+                let mut node_output = Output::from(u128::from(seed));
+                node_output += OkvsDmpf::conv_correct(input_node, sign, last_cw);
                 // node_output.mask(self.output_len);
                 node_output
             })
@@ -141,36 +142,31 @@ pub fn expand_to_okvs_value<const OKVS_WIDTH: usize>(
     }
     output
 }
-pub struct OkvsDmpf<const W: usize, const OKVS_WIDTH: usize> {
-    input_len: usize,
+pub struct OkvsDmpf<const W: usize, const OW: usize, Output: DpfOutput<OW>> {
     output_len: usize,
     point_count: usize,
     epsilon_percent: EpsilonPercent,
+    _phantom: PhantomData<Output>,
 }
-impl<const W: usize, const OKVS_WIDTH: usize> OkvsDmpf<W, OKVS_WIDTH> {
-    pub fn new(
-        input_len: usize,
-        output_len: usize,
-        point_count: usize,
-        epsilon_percent: EpsilonPercent,
-    ) -> Self {
+impl<const W: usize, const OW: usize, Output: DpfOutput<OW>> OkvsDmpf<W, OW, Output> {
+    pub fn new(output_len: usize, point_count: usize, epsilon_percent: EpsilonPercent) -> Self {
         Self {
-            input_len,
             output_len,
             point_count,
             epsilon_percent,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<const W: usize, const OKVS_WIDTH: usize> Dmpf for OkvsDmpf<W, OKVS_WIDTH> {
-    type Key = OkvsDmpfKey<W, OKVS_WIDTH>;
+impl<const W: usize, const OW: usize, Output: DpfOutput<OW>> Dmpf<OW, Output>
+    for OkvsDmpf<W, OW, Output>
+{
+    type Key = OkvsDmpfKey<W, OW, Output>;
     fn try_gen<R: CryptoRng + RngCore>(
         &self,
-        points: &[(
-            <Self::Key as DmpfKey>::InputContainer,
-            <Self::Key as DmpfKey>::OutputContainer,
-        )],
+        input_length: usize,
+        points: &[(u128, Output)],
         rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
         if points.len() != self.point_count {
@@ -178,7 +174,7 @@ impl<const W: usize, const OKVS_WIDTH: usize> Dmpf for OkvsDmpf<W, OKVS_WIDTH> {
         }
         let t = points.len();
         // assert all inputs and all outputs are of the same length.
-        let input_len = self.input_len;
+        let input_len = input_length;
         let output_len = self.output_len;
 
         // We initialize the trie with the points.
@@ -264,7 +260,7 @@ impl<const W: usize, const OKVS_WIDTH: usize> Dmpf for OkvsDmpf<W, OKVS_WIDTH> {
             (signs_0, seeds_0, signs_1, seeds_1) =
                 (next_signs_0, next_seeds_0, next_signs_1, next_seeds_1);
         }
-        let last_cw = Okvs::<W, OKVS_WIDTH>::RbOkvs(Self::gen_conv_cw(
+        let last_cw = Okvs::<W, OW, Output>::RbOkvs(Self::gen_conv_cw(
             points,
             &seeds_0,
             &signs_0,
@@ -272,25 +268,27 @@ impl<const W: usize, const OKVS_WIDTH: usize> Dmpf for OkvsDmpf<W, OKVS_WIDTH> {
             &signs_1,
             self.epsilon_percent,
         ));
-        let first_key = OkvsDmpfKey::<W, OKVS_WIDTH> {
+        let first_key = OkvsDmpfKey::<W, OW, Output> {
             seed: seed_0,
             sign: sign_0,
             output_len,
             cws: cws.clone(),
             last_cw: last_cw.clone(),
+            _p: PhantomData,
         };
-        let second_key = OkvsDmpfKey::<W, OKVS_WIDTH> {
+        let second_key = OkvsDmpfKey::<W, OW, Output> {
             seed: seed_1,
             sign: sign_1,
             output_len,
             cws,
             last_cw,
+            _p: PhantomData,
         };
         Some((first_key, second_key))
     }
 }
 
-impl<const W: usize, const OKVS_WIDTH: usize> OkvsDmpf<W, OKVS_WIDTH> {
+impl<const W: usize, const OW: usize, Output: DpfOutput<OW>> OkvsDmpf<W, OW, Output> {
     fn initialize<R: RngCore + CryptoRng>(rng: &mut R) -> [(Node, bool); 2] {
         let output = core::array::from_fn(|i| {
             let mut word: Node = random_u128(rng).into();
@@ -306,25 +304,21 @@ impl<const W: usize, const OKVS_WIDTH: usize> OkvsDmpf<W, OKVS_WIDTH> {
         }
         cw.decode(&v.into()).into()
     }
-    fn conv_correct(
-        v: Node,
-        sign: bool,
-        cw: &Okvs<W, OKVS_WIDTH>,
-    ) -> OkvsValueU128Array<OKVS_WIDTH> {
+    fn conv_correct(v: Node, sign: bool, cw: &Okvs<W, OW>) -> Output {
         if sign {
-            OkvsValueU128Array::<OKVS_WIDTH>::default()
+            Output::default()
         } else {
             cw.decode(&v.into())
         }
     }
     fn gen_conv_cw(
-        kvs: &[(OkvsValueU128Array<1>, OkvsValueU128Array<OKVS_WIDTH>)],
+        kvs: &[(u128, Output)],
         seeds_0: &[Node],
         signs_0: &[bool],
         seeds_1: &[Node],
         signs_1: &[bool],
         epsilon_percent: EpsilonPercent,
-    ) -> EncodedOkvs<W, OkvsValueU128Array<1>, OkvsValueU128Array<OKVS_WIDTH>> {
+    ) -> EncodedOkvs<W, Node, Output> {
         let v: Vec<_> = (0..kvs.len())
             .map(|k| {
                 let out_0 = expand_to_okvs_value(&seeds_0[k]);
@@ -494,12 +488,8 @@ mod test {
         const INPUT_SIZE: usize = 8;
         const OKVS_WIDTH: usize = 2;
         // const OUTPUT_SIZE: usize = 10;
-        let scheme = OkvsDmpf::<W, OKVS_WIDTH>::new(
-            INPUT_SIZE,
-            OKVS_WIDTH * 64,
-            POINTS,
-            rb_okvs::EpsilonPercent::Ten,
-        );
+        let scheme =
+            OkvsDmpf::<W, OKVS_WIDTH>::new(OKVS_WIDTH * 64, POINTS, rb_okvs::EpsilonPercent::Ten);
         let mut rng = thread_rng();
         // let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
@@ -509,7 +499,7 @@ mod test {
             )
         });
         let input_map: HashMap<_, _> = inputs.iter().copied().collect();
-        let (key_1, key_2) = scheme.try_gen(&inputs[..], &mut rng).unwrap();
+        let (key_1, key_2) = scheme.try_gen(INPUT_SIZE, &inputs[..], &mut rng).unwrap();
         let eval_all_1 = key_1.eval_all();
         let eval_all_2 = key_2.eval_all();
         for i in 0..(1 << INPUT_SIZE) {

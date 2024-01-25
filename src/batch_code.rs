@@ -9,19 +9,13 @@ use crate::{
 };
 
 pub struct BatchCodeDmpf<const WIDTH: usize> {
-    input_domain_log_size: usize,
     hash_functions_count: usize,
     expansion_overhead_in_percent: usize,
 }
 
 impl<const WIDTH: usize> BatchCodeDmpf<WIDTH> {
-    pub fn new(
-        input_domain_log_size: usize,
-        hash_functions_count: usize,
-        expansion_overhead_in_percent: usize,
-    ) -> Self {
+    pub fn new(hash_functions_count: usize, expansion_overhead_in_percent: usize) -> Self {
         Self {
-            input_domain_log_size,
             hash_functions_count,
             expansion_overhead_in_percent,
         }
@@ -39,6 +33,7 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
     type Key = BatchCodeDmpfKey<WIDTH>;
     fn try_gen<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(
         &self,
+        input_length: usize,
         inputs: &[(
             <Self::Key as DmpfKey>::InputContainer,
             <Self::Key as DmpfKey>::OutputContainer,
@@ -46,15 +41,14 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
         mut rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
         let buckets = (inputs.len() * (100 + self.expansion_overhead_in_percent)) / 100;
-        let bucket_size =
-            ((1 << self.input_domain_log_size) * self.hash_functions_count).div_ceil(buckets);
+        let bucket_size = ((1 << input_length) * self.hash_functions_count).div_ceil(buckets);
         let dpf_input_length = usize::ilog2(2 * bucket_size - 1) as usize;
         // assert_eq!(1 << bucket_log_size, bucket_size);
         let index_to_value_map: HashMap<_, _> = inputs
             .iter()
             .map(|v| {
                 (
-                    (v.0[0] >> ((u128::BITS as usize) - self.input_domain_log_size)) as usize,
+                    (v.0[0] >> ((u128::BITS as usize) - input_length)) as usize,
                     v.1,
                 )
             })
@@ -63,7 +57,7 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
         let mut hash_functions_seed = [0u8; aes_prng::SEED_SIZE];
         rng.fill_bytes(&mut hash_functions_seed);
         let encoding = batch_encode::<AesRng>(
-            self.input_domain_log_size,
+            input_length,
             &indices[..],
             buckets,
             self.hash_functions_count,
@@ -88,20 +82,20 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
         }
         let (dpfs_0, dpfs_1): (Vec<_>, Vec<_>) = dpfs.into_iter().unzip();
         let (_, hash_functions) = gen_hash_functions::<AesRng>(
-            self.input_domain_log_size,
+            input_length,
             bucket_size,
             self.hash_functions_count,
             hash_functions_seed,
         );
         Some((
             BatchCodeDmpfKey {
-                input_domain_log_size: self.input_domain_log_size,
+                input_domain_log_size: input_length,
                 dpf_input_length,
                 buckets: dpfs_0,
                 hash_functions: hash_functions.clone(),
             },
             BatchCodeDmpfKey {
-                input_domain_log_size: self.input_domain_log_size,
+                input_domain_log_size: input_length,
                 dpf_input_length,
                 buckets: dpfs_1,
                 hash_functions,
@@ -350,7 +344,7 @@ mod test {
         const INPUT_SIZE: usize = 4;
         const OUTPUT_SIZE: usize = 127;
         const EXPANSION_OVERHEAD_IN_PERCENT: usize = 50;
-        let scheme = BatchCodeDmpf::new(INPUT_SIZE, W, EXPANSION_OVERHEAD_IN_PERCENT);
+        let scheme = BatchCodeDmpf::new(W, EXPANSION_OVERHEAD_IN_PERCENT);
         let mut rng = thread_rng();
         let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
@@ -360,7 +354,7 @@ mod test {
             )
         });
         let input_map: HashMap<_, _> = inputs.iter().copied().collect();
-        let (key_1, key_2) = scheme.try_gen(&inputs[..], &mut rng).unwrap();
+        let (key_1, key_2) = scheme.try_gen(INPUT_SIZE, &inputs[..], &mut rng).unwrap();
         let eval_all_1 = key_1.eval_all();
         let eval_all_2 = key_2.eval_all();
         for i in 0..(1 << INPUT_SIZE) {

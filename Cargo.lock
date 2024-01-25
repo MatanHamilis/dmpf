@@ -407,6 +407,7 @@ dependencies = [
  "aes-prng",
  "dmpf",
  "rand",
+ "rb-okvs",
 ]
 
 [[package]]
@@ -532,6 +533,7 @@ dependencies = [
  "aes",
  "aes-prng",
  "criterion",
+ "dmpf",
  "rand",
 ]
 

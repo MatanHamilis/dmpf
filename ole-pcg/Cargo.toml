@@ -9,3 +9,4 @@ edition = "2021"
 rand = {workspace = true}
 dmpf = {workspace = true}
 aes-prng = {workspace = true}
+rb-okvs = {workspace = true}

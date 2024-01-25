@@ -12,6 +12,7 @@ aes-prng = {wrokspace = true}
 
 [dev-dependencies]
 criterion = "0.5.1"
+dmpf = {workspace = true}
 
 [[bench]]
 name = "okvs"

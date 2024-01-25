@@ -1,40 +1,31 @@
-use rb_okvs::OkvsValueU128Array;
-
 use super::BITS_OF_SECURITY;
 use crate::prg::double_prg;
 use crate::prg::many_prg;
 use crate::prg::DOUBLE_PRG_CHILDREN;
-use crate::utils::BitSlice;
-use crate::utils::BitSliceMut;
 use crate::utils::BitVec;
-use crate::utils::ExpandedNode;
 use crate::utils::Node;
 use crate::Dmpf;
 use crate::DmpfKey;
-use std::ops::BitXorAssign;
+use crate::DpfOutput;
 
 #[derive(Clone, Copy)]
 pub struct CorrectionWord {
     node: Node,
 }
-pub struct DpfDmpf<const WIDTH: usize> {
-    input_len: usize,
-}
-impl<const WIDTH: usize> Dmpf for DpfDmpf<WIDTH> {
-    type Key = DpfDmpfKey<WIDTH>;
+pub struct DpfDmpf {}
+impl<Output: DpfOutput> Dmpf<Output> for DpfDmpf {
+    type Key = DpfDmpfKey<Output>;
     fn try_gen<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(
         &self,
-        inputs: &[(
-            <Self::Key as crate::DmpfKey>::InputContainer,
-            <Self::Key as crate::DmpfKey>::OutputContainer,
-        )],
+        input_length: usize,
+        inputs: &[(u128, Output)],
         mut rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
         let mut first_keys = Vec::with_capacity(inputs.len());
         let mut second_keys = Vec::with_capacity(inputs.len());
         inputs.iter().for_each(|(k, v)| {
             let roots = (Node::random(&mut rng), Node::random(&mut rng));
-            let (f, s) = DpfKey::gen(&roots, k, self.input_len, v);
+            let (f, s) = DpfKey::gen(&roots, k, input_length, v);
             first_keys.push(f);
             second_keys.push(s);
         });
@@ -48,47 +39,43 @@ impl<const WIDTH: usize> Dmpf for DpfDmpf<WIDTH> {
         ))
     }
 }
-pub struct DpfDmpfKey<const WIDTH: usize> {
-    dpf_keys: Vec<DpfKey<WIDTH>>,
+pub struct DpfDmpfKey<Output> {
+    dpf_keys: Vec<DpfKey<Output>>,
 }
-impl<const WIDTH: usize> DmpfKey for DpfDmpfKey<WIDTH> {
-    type InputContainer = OkvsValueU128Array<1>;
-    type OutputContainer = OkvsValueU128Array<WIDTH>;
+impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
     type Session = ();
-    fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
-        *output = OkvsValueU128Array::default();
-        self.dpf_keys.iter().for_each(|k| {
-            let mut cur_out = [Node::default(); WIDTH];
-            k.eval(input, &mut cur_out);
-            *output ^= OkvsValueU128Array::from(core::array::from_fn(|i| cur_out[i].into()));
-        });
+    fn eval(&self, input: &u128, output: &mut Output) {
+        *output = self
+            .dpf_keys
+            .iter()
+            .map(|k| {
+                let mut cur_out = Output::default();
+                k.eval(input, &mut cur_out);
+                cur_out
+            })
+            .sum();
     }
     fn make_session(&self) -> Self {
         unimplemented!()
     }
-    fn eval_all(&self) -> Box<[Self::OutputContainer]> {
-        let mut f: Vec<OkvsValueU128Array<WIDTH>> = self.dpf_keys[0]
-            .eval_all()
-            .into_iter()
-            .map(|v| core::array::from_fn(|i| v[i].into()).into())
-            .collect();
+    fn eval_all(&self) -> Vec<Output> {
+        let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
         self.dpf_keys[1..].iter().for_each(|k| {
             f.iter_mut()
                 .zip(k.eval_all().into_iter())
                 .for_each(|(o, i)| {
-                    *o = core::array::from_fn(|idx| o[idx] ^ u128::from(i[idx])).into();
+                    *o += i;
                 })
         });
-        f.into()
+        f
     }
 }
-pub struct DpfKey<const WIDTH: usize> {
+pub struct DpfKey<Output> {
     root: Node,
     root_bit: bool,
     cws: Vec<CorrectionWord>,
-    last_cw: [Node; WIDTH],
+    last_cw: Output,
     input_bits: usize,
-    output_bits: usize,
 }
 impl CorrectionWord {
     fn new(mut node: Node, left_bit: bool, right_bit: bool) -> Self {
@@ -126,13 +113,16 @@ pub(crate) fn convert_into(node: &Node, output: &mut [Node]) {
         output[0] = *node;
     }
 }
-impl<const WIDTH: usize> DpfKey<WIDTH> {
+fn get_bit(v: u128, bit_idx: usize) -> bool {
+    (v >> (127 - bit_idx)) & 1 == 1
+}
+impl<Output: DpfOutput> DpfKey<Output> {
     pub fn gen(
         roots: &(Node, Node),
-        alpha: &OkvsValueU128Array<1>,
+        alpha: &u128,
         input_len: usize,
-        beta: &OkvsValueU128Array<WIDTH>,
-    ) -> (DpfKey<WIDTH>, DpfKey<WIDTH>) {
+        beta: &Output,
+    ) -> (DpfKey<Output>, DpfKey<Output>) {
         let mut t_0 = false;
         let mut t_1 = true;
         let mut seed_0 = roots.0;
@@ -141,7 +131,7 @@ impl<const WIDTH: usize> DpfKey<WIDTH> {
         for i in 0..input_len {
             let [mut seeds_l_0, mut seeds_r_0] = double_prg(&seed_0, &DOUBLE_PRG_CHILDREN);
             let [mut seeds_l_1, mut seeds_r_1] = double_prg(&seed_1, &DOUBLE_PRG_CHILDREN);
-            let path_bit = alpha.get_bit(i);
+            let path_bit = get_bit(*alpha, i);
             let (t_l_0, _) = seeds_l_0.pop_first_two_bits();
             let (t_l_1, _) = seeds_l_1.pop_first_two_bits();
             let (t_r_0, _) = seeds_r_0.pop_first_two_bits();
@@ -167,19 +157,18 @@ impl<const WIDTH: usize> DpfKey<WIDTH> {
             };
             cws.push(CorrectionWord::new(cw_node, diff_bit_left, diff_bit_right));
         }
-        let mut conv_0 = [Node::default(); WIDTH];
-        let mut conv_1 = [Node::default(); WIDTH];
-        convert_into(&seed_0, &mut conv_0);
-        convert_into(&seed_1, &mut conv_1);
-        let last_cw: [Node; WIDTH] =
-            core::array::from_fn(|i| conv_0[i] ^ conv_1[i] ^ beta[i].into());
+        let conv_0 = Output::from(u128::from(seed_0));
+        let conv_1 = Output::from(u128::from(seed_1));
+        let mut last_cw: Output = conv_0 - conv_1 - *beta;
+        if t_0 {
+            last_cw = last_cw.neg();
+        }
         let first_key = DpfKey {
             root: roots.0,
             root_bit: false,
             cws: cws.clone(),
             last_cw: last_cw.into(),
             input_bits: input_len,
-            output_bits: WIDTH * 128,
         };
         let second_key = DpfKey {
             root: roots.1,
@@ -187,15 +176,14 @@ impl<const WIDTH: usize> DpfKey<WIDTH> {
             cws,
             last_cw: last_cw.into(),
             input_bits: input_len,
-            output_bits: WIDTH * 128,
         };
         (first_key, second_key)
     }
-    pub fn eval(&self, x: &OkvsValueU128Array<1>, output: &mut [Node; WIDTH]) {
+    pub fn eval(&self, x: &u128, output: &mut Output) {
         let mut t = self.root_bit;
         let mut s = self.root;
         for (idx, cw) in self.cws.iter().enumerate() {
-            let path_bit = x.get_bit(idx);
+            let path_bit = get_bit(*x, idx);
             let seeds = double_prg(&s, &DOUBLE_PRG_CHILDREN);
             s = seeds[path_bit as usize];
             let (mut new_t, _) = s.pop_first_two_bits();
@@ -207,12 +195,15 @@ impl<const WIDTH: usize> DpfKey<WIDTH> {
             }
             t = new_t;
         }
-        convert_into(&s, output.as_mut());
+        *output = Output::from(u128::from(s));
         if t {
-            *output = core::array::from_fn(|i| output[i] ^ self.last_cw[i]);
+            *output += self.last_cw;
         }
+        // if self.root_bit {
+        //     *output = output.neg();
+        // }
     }
-    pub fn eval_all(&self) -> Vec<[Node; WIDTH]> {
+    pub fn eval_all(&self) -> Vec<Output> {
         let mut cur_seeds = vec![self.root];
         let mut cur_signs = vec![self.root_bit];
         for depth in 0..self.input_bits {
@@ -243,13 +234,14 @@ impl<const WIDTH: usize> DpfKey<WIDTH> {
             .into_iter()
             .zip(cur_signs.into_iter())
             .map(|(s, t)| {
-                let mut my_last_cw = [Node::default(); WIDTH];
-                convert_into(&s, &mut my_last_cw);
-                if t {
-                    core::array::from_fn(|i| my_last_cw[i] ^ last_cw[i])
-                } else {
-                    my_last_cw
-                }
+                let my_last_cw = Output::from(u128::from(s));
+                let output = if t { my_last_cw + last_cw } else { my_last_cw };
+                output
+                // if self.root_bit {
+                //     -output
+                // } else {
+                //     output
+                // }
             })
             .collect()
     }
@@ -297,39 +289,39 @@ pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use rand::{thread_rng, RngCore};
-    use rb_okvs::OkvsValueU128Array;
 
-    use crate::random_u128;
+    use crate::field::PrimeField64x2;
 
     use super::{DpfKey, Node};
 
     #[test]
     fn test_dpf() {
-        const DEPTH: usize = 2;
+        const DEPTH: usize = 12;
         let mut rng = thread_rng();
         let root_0 = Node::random(&mut rng);
         let root_1 = Node::random(&mut rng);
         let roots = (root_0, root_1);
         let point = (rng.next_u64() & ((1 << DEPTH) - 1)) as u128;
-        let alpha_idx = [point << (128 - DEPTH)].into();
-        let beta = [random_u128(&mut rng); 2].into();
+        // let alpha_idx = [point << (128 - DEPTH)].into();
+        let alpha_idx = point << (128 - DEPTH);
+        let beta = PrimeField64x2::random(&mut rng);
         let (k_0, k_1) = DpfKey::gen(&roots, &alpha_idx, DEPTH, &beta);
         let eval_all_0 = k_0.eval_all();
         let eval_all_1 = k_1.eval_all();
         for i in 0usize..1 << DEPTH {
-            let input = [(i as u128) << (128 - DEPTH)].into();
-            let mut bs_output_0 = [Node::default(); 2];
-            let mut bs_output_1 = [Node::default(); 2];
+            let input = (i as u128) << (128 - DEPTH);
+            let mut bs_output_0 = PrimeField64x2::default();
+            let mut bs_output_1 = PrimeField64x2::default();
             k_0.eval(&input, &mut bs_output_0);
             k_1.eval(&input, &mut bs_output_1);
             assert_eq!(bs_output_0, eval_all_0[i]);
             assert_eq!(bs_output_1, eval_all_1[i]);
+            let bs_output = bs_output_0 - bs_output_1;
             if (i as u128) != point {
-                assert_eq!(&bs_output_0, &bs_output_1);
+                assert_eq!(bs_output, PrimeField64x2::default());
             }
             if (i as u128) == point {
-                let bs_output: OkvsValueU128Array<2> =
-                    core::array::from_fn(|i| u128::from(bs_output_0[i] ^ bs_output_1[i])).into();
+                // core::array::from_fn(|i| u128::from(bs_output_0[i] ^ bs_output_1[i])).into();
                 assert_eq!(bs_output, beta);
             }
         }

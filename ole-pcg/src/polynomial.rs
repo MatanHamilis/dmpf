@@ -2,13 +2,16 @@ use std::{
     borrow::Borrow,
     collections::HashMap,
     ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign},
+    process::Output,
 };
 
 use dmpf::{Dmpf, DmpfKey};
+use rand::thread_rng;
+use rb_okvs::OkvsValueU128Array;
 
 use crate::{
     fft::{fft, ifft},
-    field::{PowersIterator, RadixTwoFftFriendFieldElement},
+    field::{PowersIterator, PrimeField64, PrimeField64x2, RadixTwoFftFriendFieldElement},
 };
 pub trait Polynomial<F: RadixTwoFftFriendFieldElement>:
     Add + AddAssign + SubAssign + Clone + Index<usize> + IndexMut<usize>
@@ -28,11 +31,28 @@ impl<F: RadixTwoFftFriendFieldElement> SparsePolynomial<F> {
     pub fn new(coefficients: Vec<(F, usize)>) -> Self {
         Self { coefficients }
     }
-    pub fn share<D: Dmpf>(&self, points: usize, dmpf: &D) where <D::Key as DmpfKey>::InputContainer={
-
-        let f = dmpf.try_gen(inputs, rng);
-    }
 }
+// pub fn share_polynomial<
+//     D: Dmpf,
+//     K: DmpfKey<InputContainer = u128,Output=PrimeField64x2>,
+// >(
+//     p: &SparsePolynomial<PrimeField64>,
+//     points: usize,
+//     dmpf: &D,
+//     log_degree: usize,
+// ) -> (K, K){
+//     assert_eq!(W, F::U128_WIDTH);
+//     assert!(points >= self.coefficients.len());
+//     let lower_bits_to_shrink = if F::U128_WIDTH > 1 {
+//         1
+//     } else {
+//         128 / F::FIELD_BITS
+//     }
+//     .ilog2() as usize;
+//     let dpf_input_length = log_degree - lower_bits_to_shrink;
+//     let inputs =
+//     let f = dmpf.try_gen(log_degree, inputs, &mut thread_rng());
+// }
 
 #[derive(Clone)]
 pub struct DensePolynomial<F: RadixTwoFftFriendFieldElement> {
