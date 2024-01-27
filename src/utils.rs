@@ -1,11 +1,11 @@
 use std::{
     cmp::Ordering,
     iter::Sum,
-    ops::{AddAssign, BitXor, BitXorAssign, Div, Mul, SubAssign},
+    ops::{AddAssign, BitXor, BitXorAssign, Div, Mul, MulAssign, SubAssign},
 };
 
+use crate::rb_okvs::{OkvsKey, OkvsValue};
 use rand::{CryptoRng, RngCore};
-use rb_okvs::OkvsValue;
 
 use crate::{prg::many_prg, BITS_OF_SECURITY, BYTES_OF_SECURITY};
 
@@ -14,6 +14,14 @@ pub struct Node(u128);
 impl From<u128> for Node {
     fn from(value: u128) -> Self {
         Self(value)
+    }
+}
+impl OkvsKey for Node {
+    fn hash_seed(&self) -> [u8; 16] {
+        self.0.to_be_bytes()
+    }
+    fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
+        Self::random(rng)
     }
 }
 impl From<Node> for u128 {
@@ -34,6 +42,16 @@ impl OkvsValue for Node {
     }
     fn is_zero(&self) -> bool {
         self.0 == 0u128
+    }
+    fn inv(&self) -> Self {
+        assert_eq!(self.0, 1u128);
+        self.clone()
+    }
+}
+impl MulAssign for Node {
+    fn mul_assign(&mut self, rhs: Self) {
+        assert_eq!(self.0, 1u128);
+        *self = rhs;
     }
 }
 impl Mul for Node {

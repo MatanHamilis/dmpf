@@ -1,9 +1,9 @@
 use core::panic;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use dmpf::rb_okvs::{g, EpsilonPercent, LogN, OkvsKey, OkvsU128, OkvsValue};
 use dmpf::PrimeField64x2;
 use rand::{thread_rng, CryptoRng, RngCore};
-use rb_okvs::{g, EpsilonPercent, LogN, OkvsKey, OkvsU128, OkvsValue};
 
 const LAMBDA: usize = 40;
 fn generate_kvs<K: OkvsKey, V: OkvsValue>(size: usize) -> Vec<(K, V)> {

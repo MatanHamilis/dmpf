@@ -1,15 +1,16 @@
 [workspace]
 members = [
 	".", "ole-pcg",
-	"rb-okvs"
+#	"rb-okvs"
 ]
 [workspace.dependencies]
 aes = "0.8"
 rand = "0.8.5"
 aes-prng = "0.2"
-rb-okvs = {path = "rb-okvs"}
 dmpf = {path = "."}
 ole-pcg = {path = "ole-pcg"}
+
+# rb-okvs = {path = "rb-okvs"}
 
 
 [package]
@@ -24,7 +25,8 @@ once_cell = "1"
 aes = {workspace = true}
 rand = {workspace = true}
 aes-prng = {workspace = true}
-rb-okvs = {workspace = true}
+
+# rb-okvs = {workspace = true}
 
 [dev-dependencies]
 criterion = "0.5.1"
@@ -36,3 +38,7 @@ harness = false
 
 [build]
 rustflags = ["-C", "target-cpu=native"]
+
+[[bench]]
+name = "okvs"
+harness = false

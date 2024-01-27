@@ -157,8 +157,8 @@ impl<Output: DpfOutput> DpfKey<Output> {
             };
             cws.push(CorrectionWord::new(cw_node, diff_bit_left, diff_bit_right));
         }
-        let conv_0 = Output::from(u128::from(seed_0));
-        let conv_1 = Output::from(u128::from(seed_1));
+        let conv_0 = Output::from(seed_0);
+        let conv_1 = Output::from(seed_1);
         let mut last_cw: Output = conv_0 - conv_1 - *beta;
         if t_0 {
             last_cw = last_cw.neg();
@@ -195,13 +195,10 @@ impl<Output: DpfOutput> DpfKey<Output> {
             }
             t = new_t;
         }
-        *output = Output::from(u128::from(s));
+        *output = Output::from(s);
         if t {
             *output += self.last_cw;
         }
-        // if self.root_bit {
-        //     *output = output.neg();
-        // }
     }
     pub fn eval_all(&self) -> Vec<Output> {
         let mut cur_seeds = vec![self.root];
@@ -234,47 +231,11 @@ impl<Output: DpfOutput> DpfKey<Output> {
             .into_iter()
             .zip(cur_signs.into_iter())
             .map(|(s, t)| {
-                let my_last_cw = Output::from(u128::from(s));
+                let my_last_cw = Output::from(s);
                 let output = if t { my_last_cw + last_cw } else { my_last_cw };
                 output
-                // if self.root_bit {
-                //     -output
-                // } else {
-                //     output
-                // }
             })
             .collect()
-    }
-}
-pub struct EvalAllResult {
-    nodes: Vec<Node>,
-    output_bits: usize,
-    blocks_per_output: usize,
-    outputs_per_block: usize,
-}
-impl EvalAllResult {
-    pub fn new(nodes: Vec<Node>, output_bits: usize, leaf_depth: usize) -> Self {
-        EvalAllResult {
-            nodes,
-            output_bits,
-            blocks_per_output: (output_bits + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY,
-            outputs_per_block: 1 << leaf_depth,
-        }
-    }
-    pub fn get_item(&self, i: usize, output: &mut [Node]) {
-        if self.output_bits == 0 {
-            return;
-        }
-        assert_eq!(output.len(), self.blocks_per_output);
-        let coord = i * self.blocks_per_output / self.outputs_per_block;
-        let idx_in_block = i % self.outputs_per_block;
-        let start_bit = idx_in_block * self.output_bits;
-        output.copy_from_slice(&self.nodes[coord..coord + self.blocks_per_output]);
-        if self.outputs_per_block > 1 {
-            // clearing other bits
-            output[0].shr((BITS_OF_SECURITY - start_bit - self.output_bits) as u32);
-            output[0].shl((BITS_OF_SECURITY - self.output_bits) as u32);
-        }
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {

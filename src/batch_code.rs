@@ -1,54 +1,52 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
 
 use aes_prng::AesRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
-use rb_okvs::OkvsValueU128Array;
 
-use crate::{
-    utils::BitSlice, utils::BitSliceMut, utils::BitVec, utils::Node, Dmpf, DmpfKey, DpfKey,
-};
+use crate::{utils::Node, Dmpf, DmpfKey, DpfKey, DpfOutput};
 
-pub struct BatchCodeDmpf<const WIDTH: usize> {
+pub struct BatchCodeDmpf<Output: DpfOutput> {
     hash_functions_count: usize,
     expansion_overhead_in_percent: usize,
+    _phantom: PhantomData<Output>,
 }
 
-impl<const WIDTH: usize> BatchCodeDmpf<WIDTH> {
+impl<Output: DpfOutput> BatchCodeDmpf<Output> {
     pub fn new(hash_functions_count: usize, expansion_overhead_in_percent: usize) -> Self {
         Self {
             hash_functions_count,
             expansion_overhead_in_percent,
+            _phantom: PhantomData,
         }
     }
 }
 
-pub struct BatchCodeDmpfKey<const WIDTH: usize> {
+pub struct BatchCodeDmpfKey<Output: DpfOutput> {
     input_domain_log_size: usize,
     dpf_input_length: usize,
-    buckets: Vec<DpfKey<WIDTH>>,
+    buckets: Vec<DpfKey<Output>>,
     hash_functions: HashFunctionIndex,
 }
 
-impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
-    type Key = BatchCodeDmpfKey<WIDTH>;
+impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
+    type Key = BatchCodeDmpfKey<Output>;
     fn try_gen<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(
         &self,
         input_length: usize,
-        inputs: &[(
-            <Self::Key as DmpfKey>::InputContainer,
-            <Self::Key as DmpfKey>::OutputContainer,
-        )],
+        inputs: &[(u128, Output)],
         mut rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
         let buckets = (inputs.len() * (100 + self.expansion_overhead_in_percent)) / 100;
         let bucket_size = ((1 << input_length) * self.hash_functions_count).div_ceil(buckets);
         let dpf_input_length = usize::ilog2(2 * bucket_size - 1) as usize;
-        // assert_eq!(1 << bucket_log_size, bucket_size);
         let index_to_value_map: HashMap<_, _> = inputs
             .iter()
             .map(|v| {
                 (
-                    (v.0[0] >> ((u128::BITS as usize) - input_length)) as usize,
+                    (v.0 >> ((u128::BITS as usize) - input_length)) as usize,
                     v.1,
                 )
             })
@@ -67,15 +65,14 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
         let mut dpfs: Vec<_> = (0..buckets)
             .map(|_| {
                 let roots = (Node::random(&mut rng), Node::random(&mut rng));
-                let alpha = OkvsValueU128Array::default();
-                let beta = OkvsValueU128Array::default();
+                let alpha = 0u128;
+                let beta = Output::default();
                 DpfKey::gen(&roots, &alpha, dpf_input_length, &beta)
             })
             .collect();
         for (index, (bucket, index_in_bucket)) in encoding {
             let value = index_to_value_map[&index];
-            let mut alpha = OkvsValueU128Array::default();
-            alpha[0] = ((index_in_bucket as u128) << (128 - dpf_input_length)).into();
+            let alpha = (index_in_bucket as u128) << (128 - dpf_input_length);
             let beta = value;
             let roots = (Node::random(&mut rng), Node::random(&mut rng));
             dpfs[bucket] = DpfKey::gen(&roots, &alpha, dpf_input_length, &beta);
@@ -104,38 +101,30 @@ impl<const WIDTH: usize> Dmpf for BatchCodeDmpf<WIDTH> {
     }
 }
 
-impl<const WIDTH: usize> DmpfKey for BatchCodeDmpfKey<WIDTH> {
-    type InputContainer = OkvsValueU128Array<1>;
-    type OutputContainer = OkvsValueU128Array<WIDTH>;
+impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
     type Session = ();
-    fn eval(&self, input: &Self::InputContainer, output: &mut Self::OutputContainer) {
+    fn eval(&self, input: &u128, output: &mut Output) {
         // Zero output buffer.
-        *output ^= *output;
-        let input_usize = (input[0] >> (128 - self.input_domain_log_size)) as usize;
-        // let mut output_node = [Node::default(); WIDTH];
-        // let mut output_slice = BitSliceMut::new(128, &mut output_node);
+        *output = Output::default();
+        let input_usize = (input >> (128 - self.input_domain_log_size)) as usize;
 
         for f in self.hash_functions.iter() {
             let (bucket, index) = self.hash_functions.eval(input_usize, f);
-            let dpf_input =
-                OkvsValueU128Array::from([((index as u128) << (128 - self.dpf_input_length))]);
-            // let input_bitvec = BitSlice::new(self.dpf_input_length, &node[..]);
-            let mut cur_output = [Node::default(); WIDTH];
+            let dpf_input = (index as u128) << (128 - self.dpf_input_length);
+            let mut cur_output = Output::default();
             self.buckets[bucket].eval(&dpf_input, &mut cur_output);
-            *output = core::array::from_fn(|i| output[i] ^ u128::from(cur_output[i])).into();
+            *output += cur_output
         }
     }
-    fn eval_all(&self) -> Box<[Self::OutputContainer]> {
+    fn eval_all(&self) -> Vec<Output> {
         let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
         let input_domain_size = 1 << self.input_domain_log_size;
         let mut output = Vec::with_capacity(input_domain_size);
         for i in 0..input_domain_size {
-            let mut output_cur = OkvsValueU128Array::<WIDTH>::default();
+            let mut output_cur = Output::default();
             for (bucket, bucket_idx) in self.hash_functions.eval_all(i) {
                 let c = dpfs_eval_all[bucket][bucket_idx];
-                for j in 0..WIDTH {
-                    output_cur[j] ^= u128::from(c[j]);
-                }
+                output_cur += c;
             }
             output.push(output_cur);
         }
@@ -279,11 +268,11 @@ mod test {
 
     use aes_prng::AesRng;
     use rand::{thread_rng, RngCore};
-    use rb_okvs::OkvsValueU128Array;
 
     use crate::{
         batch_code::{gen_hash_functions, BatchCodeDmpf},
-        random_u128, Dmpf, DmpfKey,
+        rb_okvs::OkvsValue,
+        Dmpf, DmpfKey, PrimeField64x2,
     };
 
     use super::batch_encode;
@@ -342,15 +331,13 @@ mod test {
         const W: usize = 4;
         const POINTS: usize = 10;
         const INPUT_SIZE: usize = 4;
-        const OUTPUT_SIZE: usize = 127;
         const EXPANSION_OVERHEAD_IN_PERCENT: usize = 50;
         let scheme = BatchCodeDmpf::new(W, EXPANSION_OVERHEAD_IN_PERCENT);
         let mut rng = thread_rng();
-        let output_mask: u128 = ((1u128 << OUTPUT_SIZE) - 1) << (128 - OUTPUT_SIZE);
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
             (
                 encode_input(i, INPUT_SIZE),
-                OkvsValueU128Array::from([random_u128(&mut rng) & output_mask]),
+                PrimeField64x2::random(&mut rng),
             )
         });
         let input_map: HashMap<_, _> = inputs.iter().copied().collect();
@@ -358,22 +345,22 @@ mod test {
         let eval_all_1 = key_1.eval_all();
         let eval_all_2 = key_2.eval_all();
         for i in 0..(1 << INPUT_SIZE) {
-            let mut output_1 = OkvsValueU128Array::default();
-            let mut output_2 = OkvsValueU128Array::default();
+            let mut output_1 = PrimeField64x2::default();
+            let mut output_2 = PrimeField64x2::default();
             let encoded_i = encode_input(i, INPUT_SIZE);
             key_1.eval(&encoded_i, &mut output_1);
             key_2.eval(&encoded_i, &mut output_2);
             assert_eq!(output_1, eval_all_1[i]);
             assert_eq!(output_2, eval_all_2[i]);
-            let output = output_1 ^ output_2;
+            let output = output_1 - output_2;
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
             } else {
-                assert_eq!(output, OkvsValueU128Array::default());
+                assert!(output.is_zero());
             };
         }
     }
-    fn encode_input(i: usize, input_len: usize) -> OkvsValueU128Array<1> {
-        OkvsValueU128Array::from([(i as u128) << (128 - input_len)])
+    fn encode_input(i: usize, input_len: usize) -> u128 {
+        (i as u128) << (128 - input_len)
     }
 }

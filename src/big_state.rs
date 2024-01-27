@@ -5,7 +5,6 @@ use aes_prng::AesRng;
 
 use crate::dpf::convert_into;
 use crate::dpf::tree_and_leaf_depth;
-use crate::dpf::EvalAllResult;
 use crate::trie::BinaryTrie;
 use crate::utils::BitVec;
 use crate::utils::ExpandedNode;

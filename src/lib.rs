@@ -12,8 +12,9 @@ mod prg;
 mod trie;
 mod utils;
 pub use dpf::int_to_bits;
-// pub mod batch_code;
-// pub mod okvs;
+pub mod batch_code;
+pub mod okvs;
+mod rb_okvs;
 
 pub use dpf::DpfKey;
 use rand::CryptoRng;
@@ -29,7 +30,7 @@ pub use field::{PrimeField64, PrimeField64x2, RadixTwoFftFriendFieldElement};
 pub trait DpfOutput:
     Sub<Output = Self>
     + Add<Output = Self>
-    + From<u128>
+    + From<Node>
     + Sum
     + Default
     + Neg<Output = Self>

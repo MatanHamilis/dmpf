@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
     iter::Sum,
     marker::PhantomData,
-    ops::{AddAssign, Div, Mul, SubAssign},
+    ops::{AddAssign, Div, Mul, MulAssign, SubAssign},
 };
 
 use aes_prng::AesRng;
@@ -15,6 +15,7 @@ pub trait OkvsValue:
     + Copy
     + Mul<bool, Output = Self>
     + Mul<Output = Self>
+    + MulAssign
     + Eq
     + PartialEq
     + Debug
@@ -27,6 +28,7 @@ pub trait OkvsValue:
 {
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
     fn is_zero(&self) -> bool;
+    fn inv(&self) -> Self;
 }
 
 pub trait OkvsKey {
@@ -34,6 +36,7 @@ pub trait OkvsKey {
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
 }
 
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct OkvsU128(u128);
 impl OkvsKey for OkvsU128 {
     fn hash_seed(&self) -> [u8; 16] {
@@ -45,9 +48,10 @@ impl OkvsKey for OkvsU128 {
         Self(u128::from_be_bytes(bytes))
     }
 }
-
-fn random_u128<R: CryptoRng + RngCore>(mut rng: R) -> u128 {
-    ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128)
+impl OkvsU128 {
+    pub fn new(v: u128, input_size: usize) -> Self {
+        Self(v << (128 - input_size))
+    }
 }
 
 /// This type is mainly used for testing.
@@ -59,6 +63,15 @@ impl OkvsValue for OkvsBool {
     }
     fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
         Self(rng.next_u32() & 1 == 1)
+    }
+    fn inv(&self) -> Self {
+        assert!(!self.is_zero());
+        self.clone()
+    }
+}
+impl MulAssign for OkvsBool {
+    fn mul_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
     }
 }
 impl Mul for OkvsBool {
@@ -201,6 +214,11 @@ impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
         output.align();
         output
     }
+    fn normalize(&mut self) {
+        let factor = self.band[0].inv();
+        self.band.iter_mut().for_each(|v| *v *= factor);
+        self.rhs *= factor;
+    }
     fn align(&mut self) {
         // Safety: there will be no zeros with negligible probability!
         let shift = self
@@ -216,6 +234,7 @@ impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
         for i in W - shift..W {
             self.band[i] = V::default();
         }
+
         // let mask: u64 = u64::rotate_right((1 << shift) - 1, shift);
         // let anti_mask: u64 = !mask;
         // self.band[0] = self.band[0].overflowing_shr(shift).0;
@@ -360,7 +379,7 @@ impl<const W: usize, K: OkvsKey, V: OkvsValue> EncodedOkvs<W, K, V> {
         let (offset, bits) = hash_key_compressed::<W, K>(key, self.0.len());
         let slice = &self.0[offset..offset + (W as usize)];
         bits.zip(slice)
-            .map(|(mut bit, v)| *v * bit)
+            .map(|(bit, v)| *v * bit)
             .fold(V::default(), |mut cur, acc| {
                 cur += acc;
                 cur
@@ -372,6 +391,8 @@ impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, 
     fn sub_assign(&mut self, rhs: &Self) {
         // If I'm being subtracted, then anyway nothing should change *before* my first column.
         debug_assert_eq!(self.first_col, rhs.first_col);
+        let t = rhs.get_bit_value_uncheck(self.first_col);
+        assert_eq!(t / t, t);
         let factor = self.band[0] / rhs.get_bit_value_uncheck(self.first_col);
         self.band
             .iter_mut()
@@ -379,6 +400,7 @@ impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, 
             .for_each(|(a, b)| *a -= factor * *b);
         self.rhs -= factor * rhs.rhs;
         self.align();
+        self.normalize();
     }
 }
 
@@ -439,6 +461,7 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
             if matrix[j].first_col == start_column {
                 matrix[j] -= row_ref;
                 debug_assert!(matrix[j].first_col > start_column);
+                debug_assert_eq!(matrix[j].band[0].inv(), matrix[j].band[0]);
                 max_col = matrix[j].first_col.max(max_col);
                 j += 1;
             } else {
@@ -465,7 +488,7 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
             while matrix[j].first_col + W > current_first_col {
                 let col_value = matrix[j].get_bit_value_uncheck(current_first_col);
                 if !col_value.is_zero() {
-                    matrix[j].rhs -= rhs;
+                    matrix[j].rhs -= col_value * rhs;
                 }
                 if j > 0 {
                     j -= 1;
@@ -490,9 +513,85 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
 
 #[cfg(test)]
 mod tests {
+    #[derive(Hash, Debug, PartialEq, Eq, Clone, Copy)]
+    pub struct OkvsMod3(u8);
+    impl OkvsValue for OkvsMod3 {
+        fn is_zero(&self) -> bool {
+            self.0 == 0
+        }
+        fn random<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(mut rng: R) -> Self {
+            Self((rng.next_u32() % 3) as u8)
+        }
+        fn inv(&self) -> Self {
+            assert_ne!(self.0, 0);
+            self.clone()
+        }
+    }
+    impl MulAssign for OkvsMod3 {
+        fn mul_assign(&mut self, rhs: Self) {
+            self.0 *= rhs.0;
+            self.0 %= 3;
+        }
+    }
+    impl Default for OkvsMod3 {
+        fn default() -> Self {
+            Self(0)
+        }
+    }
+    impl Mul<bool> for OkvsMod3 {
+        type Output = Self;
+        fn mul(mut self, rhs: bool) -> Self::Output {
+            self.0 *= rhs as u8;
+            self
+        }
+    }
+    impl Mul for OkvsMod3 {
+        type Output = Self;
+        fn mul(mut self, rhs: Self) -> Self::Output {
+            self.0 *= rhs.0;
+            self.0 %= 3;
+            self
+        }
+    }
+    impl AddAssign for OkvsMod3 {
+        fn add_assign(&mut self, rhs: Self) {
+            self.0 += rhs.0;
+            self.0 %= 3;
+        }
+    }
+    impl SubAssign for OkvsMod3 {
+        fn sub_assign(&mut self, rhs: Self) {
+            self.0 += 3 - rhs.0;
+            self.0 %= 3;
+        }
+    }
+    impl Div for OkvsMod3 {
+        type Output = Self;
+        fn div(self, rhs: Self) -> Self::Output {
+            assert!(!rhs.is_zero());
+            self * rhs
+        }
+    }
+    impl From<bool> for OkvsMod3 {
+        fn from(value: bool) -> Self {
+            Self(value as u8)
+        }
+    }
+    impl Sum for OkvsMod3 {
+        fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+            let mut sum = Self::default();
+            iter.for_each(|v| sum += v);
+            sum
+        }
+    }
+    use std::{
+        iter::Sum,
+        ops::{AddAssign, Div, Mul, MulAssign, SubAssign},
+    };
+
     use rand::thread_rng;
 
-    use crate::{encode, EpsilonPercent, OkvsBool, OkvsKey, OkvsU128, OkvsValue};
+    use crate::rb_okvs::{encode, EpsilonPercent, OkvsKey, OkvsU128, OkvsValue};
 
     fn test_okvs<const W: usize, K: OkvsKey, V: OkvsValue>(
         kvs: &[(K, V)],
@@ -511,8 +610,8 @@ mod tests {
     }
     #[test]
     fn test_okvs_small() {
-        let kvs = randomize_kvs(10_000);
-        test_okvs::<576, OkvsU128, OkvsBool>(&kvs, EpsilonPercent::Three);
+        let kvs = randomize_kvs(1_000);
+        test_okvs::<576, OkvsU128, OkvsMod3>(&kvs, EpsilonPercent::Three);
         // test_okvs::<7, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Five);
         // test_okvs::<5, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Seven);
         // test_okvs::<4, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Ten);
