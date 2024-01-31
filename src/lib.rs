@@ -7,7 +7,7 @@ use std::ops::Sub;
 
 // pub mod big_state;
 mod dpf;
-mod field;
+pub mod field;
 mod prg;
 mod trie;
 mod utils;
@@ -25,7 +25,10 @@ pub use utils::{BitSlice, BitSliceMut, BitVec};
 pub const BITS_IN_BYTE: usize = 8;
 pub const BITS_OF_SECURITY: usize = 128;
 pub const BYTES_OF_SECURITY: usize = BITS_OF_SECURITY / BITS_IN_BYTE;
+pub use dpf::DpfDmpf;
 pub use field::{PrimeField64, PrimeField64x2, RadixTwoFftFriendFieldElement};
+pub use rb_okvs::EpsilonPercent;
+pub use utils::SmallFieldContainer;
 
 pub trait DpfOutput:
     Sub<Output = Self>
@@ -65,15 +68,31 @@ where
     ) -> Option<(Self::Key, Self::Key)>;
 }
 
+pub trait DmpfSession {
+    fn get_session(kvs_count: usize) -> Self;
+}
+pub struct EmptySession;
+impl DmpfSession for EmptySession {
+    fn get_session(kvs_count: usize) -> Self {
+        Self
+    }
+}
+
 pub trait DmpfKey<Output>
 where
     Self: Sized,
     Output: DpfOutput,
 {
-    type Session;
-    fn make_session(&self) -> Self;
-    fn eval(&self, input: &u128, output: &mut Output);
-    fn eval_all(&self) -> Vec<Output>;
+    type Session: DmpfSession;
+    fn make_session(&self) -> Self::Session;
+    fn eval(&self, input: &u128, output: &mut Output) {
+        self.eval_with_session(input, output, self.make_session())
+    }
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session);
+    fn eval_all(&self) -> Vec<Output> {
+        self.eval_all_with_session(self.make_session())
+    }
+    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output>;
 }
 
 pub(crate) fn random_u128<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {

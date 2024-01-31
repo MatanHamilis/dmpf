@@ -1,4 +1,4 @@
-use crate::field::{FieldElement, PowersIterator, RadixTwoFftFriendFieldElement};
+use dmpf::field::{FieldElement, PowersIterator, RadixTwoFftFriendFieldElement};
 
 fn reverse_bit_orderings<T: Copy + Clone>(v: &[T]) -> Vec<T> {
     let log_size = v.len().ilog2();

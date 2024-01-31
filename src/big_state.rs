@@ -1,7 +1,10 @@
+use std::marker::PhantomData;
 use std::ops::BitXorAssign;
 use std::time::Instant;
 
 use aes_prng::AesRng;
+use rand::CryptoRng;
+use rand::RngCore;
 
 use crate::dpf::convert_into;
 use crate::dpf::tree_and_leaf_depth;
@@ -9,8 +12,146 @@ use crate::trie::BinaryTrie;
 use crate::utils::BitVec;
 use crate::utils::ExpandedNode;
 use crate::utils::Node;
+use crate::BitSlice;
+use crate::Dmpf;
+use crate::DmpfKey;
+use crate::DpfOutput;
 
 use super::BITS_OF_SECURITY;
+pub struct BigStateDmpf<Output: DpfOutput> {
+    _phantom: PhantomData<Output>,
+}
+impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf<Output> {
+    type Key = BigStateDmpfKey<Output>;
+    fn try_gen<R: CryptoRng + RngCore>(
+        &self,
+        input_length: usize,
+        inputs: &[(u128, Output)],
+        rng: &mut R,
+    ) -> Option<(Self::Key, Self::Key)> {
+        // We assume alphas_betas is SORTED!
+        let mut alphas = BinaryTrie::default();
+        for (alpha, _) in inputs {
+            alphas.insert(&BitSlice::new(
+                input_length,
+                &std::slice::from_ref(&Node::from(*alpha)),
+            ));
+        }
+        let t = inputs.len();
+        let input_bits = input_length;
+        let mut seed_0_a = vec![Node::default(); t];
+        let mut seed_1_a = vec![Node::default(); t];
+        let mut seed_0_b = vec![Node::default(); t];
+        let mut seed_1_b = vec![Node::default(); t];
+        seed_0_a[0] = Node::random(&mut rng);
+        seed_1_a[0] = Node::random(&mut rng);
+        let mut sign_0_a = vec![BitVec::new(t); t];
+        let mut sign_1_a = vec![BitVec::new(t); t];
+        let mut sign_0_b = vec![BitVec::new(t); t];
+        let mut sign_1_b = vec![BitVec::new(t); t];
+        sign_1_a[0].set(0, true);
+        let mut container_0 = ExpandedNode::new(t);
+        let mut container_1 = ExpandedNode::new(t);
+        let mut correction_container_0 =
+            vec![Node::default(); BigStateCorrectionWord::single_node_count(t)];
+        let mut correction_container_1 =
+            vec![Node::default(); BigStateCorrectionWord::single_node_count(t)];
+        let mut cws = Vec::with_capacity(input_length);
+        let mut seed_0_prev = &mut seed_0_a;
+        let mut seed_0_cur = &mut seed_0_b;
+        let mut seed_1_prev = &mut seed_1_a;
+        let mut seed_1_cur = &mut seed_1_b;
+        let mut sign_0_prev = &mut sign_0_a;
+        let mut sign_0_cur = &mut sign_0_b;
+        let mut sign_1_prev = &mut sign_1_a;
+        let mut sign_1_cur = &mut sign_1_b;
+        for i in 0..input_length {
+            let cw = gen_cw(
+                i,
+                &alphas,
+                &seed_0_prev,
+                &seed_1_prev,
+                &mut container_0,
+                &mut container_1,
+            );
+            let mut state_idx = 0;
+            let time = Instant::now();
+            alphas.iter_at_depth(i).enumerate().count();
+            for (k, node) in alphas.iter_at_depth(i).enumerate() {
+                cw.correct(&sign_0_prev[k], &mut correction_container_0);
+                cw.correct(&sign_1_prev[k], &mut correction_container_1);
+                container_0.fill_all(&seed_0_prev[k]);
+                container_1.fill_all(&seed_1_prev[k]);
+                for z in [false, true] {
+                    if node.borrow().get_son(z).is_some() {
+                        // Handle seed.
+                        // First key
+                        let node = container_0.get_node(z);
+                        seed_0_cur[state_idx] = correction_container_0[0];
+                        seed_0_cur[state_idx].bitxor_assign(node);
+                        // Second key
+                        let node = container_1.get_node(z);
+                        seed_1_cur[state_idx] = correction_container_1[0];
+                        seed_1_cur[state_idx].bitxor_assign(node);
+
+                        // Handle sign.
+                        let expanded_bits_0 = container_0.get_bits_direction(z);
+                        let expanded_bits_1 = container_1.get_bits_direction(z);
+                        let correction_bits_0 =
+                            BigStateCorrectionWord::get_bits(&correction_container_0, z, t);
+                        let correction_bits_1 =
+                            BigStateCorrectionWord::get_bits(&correction_container_1, z, t);
+                        sign_0_cur[state_idx]
+                            .as_mut()
+                            .iter_mut()
+                            .zip(expanded_bits_0.iter())
+                            .zip(correction_bits_0.iter())
+                            .for_each(|((out, in1), in2)| {
+                                *out = *in1;
+                                out.bitxor_assign(in2);
+                            });
+                        sign_1_cur[state_idx]
+                            .as_mut()
+                            .iter_mut()
+                            .zip(expanded_bits_1.iter())
+                            .zip(correction_bits_1.iter())
+                            .for_each(|((out, in1), in2)| {
+                                *out = *in1;
+                                out.bitxor_assign(in2);
+                            });
+                        state_idx += 1;
+                    }
+                }
+            }
+            cws.push(cw);
+            (sign_0_prev, sign_0_cur) = (sign_0_cur, sign_0_prev);
+            (sign_1_prev, sign_1_cur) = (sign_1_cur, sign_1_prev);
+            (seed_0_prev, seed_0_cur) = (seed_0_cur, seed_0_prev);
+            (seed_1_prev, seed_1_cur) = (seed_1_cur, seed_1_prev);
+        }
+        // Handle last CW.
+        let last_cw = gen_conv_cw(alphas_betas, &seed_0_prev, &seed_1_prev);
+        let first_key = BigStateDpfKey {
+            root: roots.0,
+            root_sign: false,
+            cws: cws.clone(),
+            last_cw: last_cw.clone(),
+            input_len: input_bits,
+            output_len: output_bits,
+        };
+        let second_key = BigStateDpfKey {
+            root: roots.1,
+            root_sign: true,
+            cws,
+            last_cw,
+            input_len: input_bits,
+            output_len: output_bits,
+        };
+        (first_key, second_key)
+    }
+}
+pub struct BigStateDmpfKey<Output: DpfOutput> {}
+impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {}
 
 #[derive(Clone, Debug)]
 struct BigStateLastCorrectionWord {

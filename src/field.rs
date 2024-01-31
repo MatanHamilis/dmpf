@@ -1,9 +1,10 @@
 use std::{
+    fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
-use crate::rb_okvs::OkvsValue;
+use crate::{rb_okvs::OkvsValue, utils::SmallFieldContainer};
 use rand::{CryptoRng, RngCore};
 
 use crate::{DpfOutput, Node};
@@ -35,7 +36,7 @@ pub trait FieldElement:
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
 }
 
-pub trait RadixTwoFftFriendFieldElement: FieldElement + From<usize> {
+pub trait RadixTwoFftFriendFieldElement: FieldElement + From<usize> + Debug {
     fn generator_for_fft(log_fft_size: usize) -> Self;
 }
 
@@ -215,52 +216,74 @@ impl Div for PrimeField64 {
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub struct PrimeField64x2(PrimeField64, PrimeField64);
+pub struct PrimeField64x2([PrimeField64; 2]);
 impl PrimeField64x2 {
     pub fn random<R: RngCore + CryptoRng>(mut rng: R) -> Self {
-        Self(
+        Self([
             PrimeField64::random(&mut rng),
             PrimeField64::random(&mut rng),
-        )
+        ])
+    }
+}
+impl SmallFieldContainer<2, PrimeField64> for PrimeField64x2 {}
+impl Index<usize> for PrimeField64x2 {
+    type Output = PrimeField64;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+impl IndexMut<usize> for PrimeField64x2 {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+impl From<[PrimeField64; 2]> for PrimeField64x2 {
+    fn from(value: [PrimeField64; 2]) -> Self {
+        Self(value)
+    }
+}
+impl Into<[PrimeField64; 2]> for PrimeField64x2 {
+    fn into(self) -> [PrimeField64; 2] {
+        self.0
     }
 }
 impl DpfOutput for PrimeField64x2 {}
 impl From<bool> for PrimeField64x2 {
     fn from(value: bool) -> Self {
-        Self(PrimeField64(value as u64), PrimeField64(value as u64))
+        Self([PrimeField64(value as u64); 2])
     }
 }
 impl Mul for PrimeField64x2 {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        Self(self.0 * rhs.0, self.1 * rhs.1)
+        Self([self[0] * rhs[0], self[1] * rhs[1]])
     }
 }
 impl SubAssign for PrimeField64x2 {
     fn sub_assign(&mut self, rhs: Self) {
-        self.0 -= rhs.0;
-        self.1 -= rhs.1;
+        self[0] -= rhs[0];
+        self[1] -= rhs[1];
     }
 }
 impl Div for PrimeField64x2 {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
-        Self(self.0 / rhs.0, self.1 / rhs.1)
+        Self([self[0] / rhs[0], self[1] / rhs[1]])
     }
 }
 impl AddAssign for PrimeField64x2 {
     fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-        self.1 += rhs.1;
+        self[0] += rhs[0];
+        self[1] += rhs[1];
     }
 }
 impl Mul<bool> for PrimeField64x2 {
     type Output = Self;
     fn mul(self, rhs: bool) -> Self::Output {
-        Self(
-            PrimeField64(self.0 .0 * (rhs as u64)),
-            PrimeField64(self.1 .0 * (rhs as u64)),
-        )
+        Self([
+            PrimeField64(self[0].0 * (rhs as u64)),
+            PrimeField64(self[1].0 * (rhs as u64)),
+        ])
     }
 }
 impl OkvsValue for PrimeField64x2 {
@@ -268,27 +291,27 @@ impl OkvsValue for PrimeField64x2 {
         Self::random(rng)
     }
     fn is_zero(&self) -> bool {
-        self.0.is_zero() || self.1.is_zero()
+        self[0].is_zero() || self[1].is_zero()
     }
     fn inv(&self) -> Self {
-        Self(self.0.inv(), self.1.inv())
+        Self([self[0].inv(), self[1].inv()])
     }
 }
 impl MulAssign for PrimeField64x2 {
     fn mul_assign(&mut self, rhs: Self) {
-        self.0 *= rhs.0;
-        self.1 *= rhs.1;
+        self[0] *= rhs[0];
+        self[1] *= rhs[1];
     }
 }
 impl Neg for PrimeField64x2 {
     type Output = Self;
     fn neg(self) -> Self::Output {
-        PrimeField64x2(self.0.neg(), self.1.neg())
+        PrimeField64x2([self[0].neg(), self[1].neg()])
     }
 }
 impl Default for PrimeField64x2 {
     fn default() -> Self {
-        Self(PrimeField64::default(), PrimeField64::default())
+        Self([PrimeField64::default(), PrimeField64::default()])
     }
 }
 impl Sum for PrimeField64x2 {
@@ -301,7 +324,7 @@ impl From<Node> for PrimeField64x2 {
         let value = u128::from(value);
         let lower = (value & 0xffffffffffffffffu128) as u64;
         let higher = (value >> 64) as u64;
-        Self(PrimeField64::from(lower), PrimeField64::from(higher))
+        Self([PrimeField64::from(higher), PrimeField64::from(lower)])
     }
 }
 impl Add for PrimeField64x2 {

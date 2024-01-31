@@ -1,10 +1,17 @@
 use std::{
     cmp::Ordering,
     iter::Sum,
-    ops::{AddAssign, BitXor, BitXorAssign, Div, Mul, MulAssign, SubAssign},
+    ops::{
+        Add, AddAssign, BitXor, BitXorAssign, Div, Index, IndexMut, Mul, MulAssign, Neg, Sub,
+        SubAssign,
+    },
 };
 
-use crate::rb_okvs::{OkvsKey, OkvsValue};
+use crate::field::FieldElement;
+use crate::{
+    rb_okvs::{OkvsKey, OkvsValue},
+    DpfOutput,
+};
 use rand::{CryptoRng, RngCore};
 
 use crate::{prg::many_prg, BITS_OF_SECURITY, BYTES_OF_SECURITY};
@@ -14,6 +21,25 @@ pub struct Node(u128);
 impl From<u128> for Node {
     fn from(value: u128) -> Self {
         Self(value)
+    }
+}
+impl DpfOutput for Node {}
+impl Neg for Node {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self
+    }
+}
+impl Add for Node {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        self ^ rhs
+    }
+}
+impl Sub for Node {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self ^ rhs
     }
 }
 impl OkvsKey for Node {
@@ -50,15 +76,16 @@ impl OkvsValue for Node {
 }
 impl MulAssign for Node {
     fn mul_assign(&mut self, rhs: Self) {
-        assert_eq!(self.0, 1u128);
-        *self = rhs;
+        // assert_eq!(self.0, 1u128);
+        self.0 *= rhs.0;
     }
 }
 impl Mul for Node {
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self::Output {
-        assert_eq!(self.0, 1u128);
-        rhs
+    fn mul(mut self, rhs: Self) -> Self::Output {
+        // assert_eq!(self.0, 1u128);
+        self *= rhs;
+        self
     }
 }
 impl AddAssign for Node {
@@ -207,6 +234,23 @@ impl AsMut<[u8]> for Node {
         }
     }
 }
+
+pub trait SmallFieldContainer<const SIZE: usize, F: FieldElement>:
+    DpfOutput
+    + From<[F; SIZE]>
+    + Into<[F; SIZE]>
+    + Clone
+    + Copy
+    + Index<usize, Output = F>
+    + IndexMut<usize, Output = F>
+    + OkvsValue
+    + Default
+{
+    fn zero() -> Self {
+        Self::from([F::zero(); SIZE])
+    }
+}
+
 #[derive(Clone)]
 pub struct ExpandedNode {
     nodes: Box<[Node]>,

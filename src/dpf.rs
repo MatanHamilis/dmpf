@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use super::BITS_OF_SECURITY;
 use crate::prg::double_prg;
 use crate::prg::many_prg;
@@ -7,12 +9,18 @@ use crate::utils::Node;
 use crate::Dmpf;
 use crate::DmpfKey;
 use crate::DpfOutput;
+use crate::EmptySession;
 
 #[derive(Clone, Copy)]
 pub struct CorrectionWord {
     node: Node,
 }
-pub struct DpfDmpf {}
+pub struct DpfDmpf;
+impl DpfDmpf {
+    pub fn new() -> Self {
+        Self
+    }
+}
 impl<Output: DpfOutput> Dmpf<Output> for DpfDmpf {
     type Key = DpfDmpfKey<Output>;
     fn try_gen<R: rand::prelude::CryptoRng + rand::prelude::RngCore>(
@@ -43,8 +51,8 @@ pub struct DpfDmpfKey<Output> {
     dpf_keys: Vec<DpfKey<Output>>,
 }
 impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
-    type Session = ();
-    fn eval(&self, input: &u128, output: &mut Output) {
+    type Session = EmptySession;
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
         *output = self
             .dpf_keys
             .iter()
@@ -55,10 +63,11 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
             })
             .sum();
     }
-    fn make_session(&self) -> Self {
-        unimplemented!()
+    fn make_session(&self) -> Self::Session {
+        EmptySession
     }
-    fn eval_all(&self) -> Vec<Output> {
+    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
+        let time = Instant::now();
         let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
         self.dpf_keys[1..].iter().for_each(|k| {
             f.iter_mut()
@@ -199,6 +208,9 @@ impl<Output: DpfOutput> DpfKey<Output> {
         if t {
             *output += self.last_cw;
         }
+        if self.root_bit {
+            *output = output.neg()
+        }
     }
     pub fn eval_all(&self) -> Vec<Output> {
         let mut cur_seeds = vec![self.root];
@@ -233,7 +245,11 @@ impl<Output: DpfOutput> DpfKey<Output> {
             .map(|(s, t)| {
                 let my_last_cw = Output::from(s);
                 let output = if t { my_last_cw + last_cw } else { my_last_cw };
-                output
+                if self.root_bit {
+                    output.neg()
+                } else {
+                    output
+                }
             })
             .collect()
     }
@@ -277,7 +293,7 @@ mod tests {
             k_1.eval(&input, &mut bs_output_1);
             assert_eq!(bs_output_0, eval_all_0[i]);
             assert_eq!(bs_output_1, eval_all_1[i]);
-            let bs_output = bs_output_0 - bs_output_1;
+            let bs_output = bs_output_0 + bs_output_1;
             if (i as u128) != point {
                 assert_eq!(bs_output, PrimeField64x2::default());
             }

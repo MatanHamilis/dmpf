@@ -38,7 +38,3 @@ harness = false
 
 [build]
 rustflags = ["-C", "target-cpu=native"]
-
-[[bench]]
-name = "okvs"
-harness = false

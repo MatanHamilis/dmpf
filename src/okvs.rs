@@ -1,6 +1,9 @@
 use std::{marker::PhantomData, u128};
 
-use crate::rb_okvs::{EncodedOkvs, EpsilonPercent, OkvsValue};
+use crate::{
+    rb_okvs::{EncodedOkvs, EpsilonPercent, OkvsValue},
+    EmptySession,
+};
 use rand::{CryptoRng, RngCore};
 
 use crate::{
@@ -35,8 +38,8 @@ pub struct OkvsDmpfKey<const W: usize, Output: DpfOutput> {
 }
 
 impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Output> {
-    type Session = ();
-    fn eval(&self, input: &u128, output: &mut Output) {
+    type Session = EmptySession;
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
         let input_length = self.cws.len();
         let mut seed = self.seed;
         let mut sign = self.sign;
@@ -59,9 +62,13 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
         let mut node_output = Output::from(seed);
         node_output += OkvsDmpf::conv_correct(input_node, sign, &self.last_cw);
         // node_output.mask(self.output_len);
-        *output = node_output;
+        *output = if self.sign {
+            node_output.neg()
+        } else {
+            node_output
+        }
     }
-    fn eval_all(&self) -> Vec<Output> {
+    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
         let input_length = self.cws.len();
         let mut sign = vec![self.sign];
         let mut seed = vec![self.seed];
@@ -102,13 +109,17 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
                 let mut node_output = Output::from(seed);
                 node_output += OkvsDmpf::conv_correct(input_node, sign, last_cw);
                 // node_output.mask(self.output_len);
-                node_output
+                if self.sign {
+                    node_output.neg()
+                } else {
+                    node_output
+                }
             })
             .collect::<Vec<_>>()
             .into()
     }
-    fn make_session(&self) -> Self {
-        unimplemented!()
+    fn make_session(&self) -> Self::Session {
+        EmptySession
     }
 }
 
@@ -135,6 +146,9 @@ impl<const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Output> for OkvsDmpf<W,
         points: &[(u128, Output)],
         rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
+        for i in 0..points.len() - 1 {
+            assert!(points[i].0 < points[i + 1].0);
+        }
         if points.len() != self.point_count {
             return None;
         }
@@ -421,41 +435,50 @@ impl<Output: OkvsValue> InformationTheoreticOkvs<Output> {
 #[cfg(test)]
 mod test {
     use super::OkvsDmpf;
-    use crate::{Dmpf, DmpfKey, PrimeField64x2};
-    use rand::thread_rng;
+    use crate::{Dmpf, DmpfKey, Node};
+    use rand::{thread_rng, RngCore};
     use std::collections::HashMap;
 
     #[test]
     fn test_okvs_dmpf() {
-        const W: usize = 4;
-        const POINTS: usize = 1;
-        const INPUT_SIZE: usize = 8;
-        let scheme =
-            OkvsDmpf::<W, PrimeField64x2>::new(POINTS, crate::rb_okvs::EpsilonPercent::Ten);
+        const W: usize = 400;
+        const POINTS: usize = 30;
+        const INPUT_SIZE: usize = 9;
+        let scheme = OkvsDmpf::<W, Node>::new(POINTS, crate::rb_okvs::EpsilonPercent::Ten);
         let mut rng = thread_rng();
-        let inputs: [_; POINTS] = core::array::from_fn(|i| {
-            (
-                encode_input(i, INPUT_SIZE),
-                PrimeField64x2::random(&mut rng),
-            )
-        });
-        let input_map: HashMap<_, _> = inputs.iter().copied().collect();
+        let mut input_map = HashMap::with_capacity(POINTS);
+        while input_map.len() < POINTS {
+            let i = (rng.next_u64() % (1 << INPUT_SIZE)) as usize;
+            let encoded_i = encode_input(i, INPUT_SIZE);
+            if input_map.contains_key(&encoded_i) {
+                continue;
+            }
+            let random_v = Node::random(&mut rng);
+            input_map.insert(encoded_i, random_v);
+        }
+        let mut inputs: Vec<_> = input_map.iter().map(|(&a, &b)| (a, b)).collect();
+        inputs.sort();
         let (key_1, key_2) = scheme.try_gen(INPUT_SIZE, &inputs[..], &mut rng).unwrap();
         let eval_all_1 = key_1.eval_all();
         let eval_all_2 = key_2.eval_all();
+        let eval_all_sum: Vec<_> = eval_all_1
+            .iter()
+            .zip(eval_all_2.iter())
+            .map(|(a, b)| *a + *b)
+            .collect();
         for i in 0..(1 << INPUT_SIZE) {
-            let mut output_1 = PrimeField64x2::default();
-            let mut output_2 = PrimeField64x2::default();
+            let mut output_1 = Node::default();
+            let mut output_2 = Node::default();
             let encoded_i = encode_input(i, INPUT_SIZE);
             key_1.eval(&encoded_i, &mut output_1);
             key_2.eval(&encoded_i, &mut output_2);
             assert_eq!(output_1, eval_all_1[i]);
             assert_eq!(output_2, eval_all_2[i]);
-            let output = output_1 - output_2;
+            let output = output_1 + output_2;
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
             } else {
-                assert_eq!(output, PrimeField64x2::default());
+                assert_eq!(output, Node::default());
             };
         }
     }

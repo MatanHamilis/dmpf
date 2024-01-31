@@ -56,7 +56,7 @@ impl OkvsU128 {
 
 /// This type is mainly used for testing.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-struct OkvsBool(bool);
+pub struct OkvsBool(bool);
 impl OkvsValue for OkvsBool {
     fn is_zero(&self) -> bool {
         !self.0
@@ -225,7 +225,7 @@ impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
             .band
             .iter()
             .enumerate()
-            .find(|(idx, v)| !v.is_zero())
+            .find(|(_, v)| !v.is_zero())
             .unwrap()
             .0;
         for i in 0..W - shift {
@@ -394,13 +394,22 @@ impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, 
         let t = rhs.get_bit_value_uncheck(self.first_col);
         assert_eq!(t / t, t);
         let factor = self.band[0] / rhs.get_bit_value_uncheck(self.first_col);
+        assert!(!factor.is_zero());
+        // println!("Before, factor: {factor:?}");
+        // dbg!(&self.band);
         self.band
             .iter_mut()
             .zip(rhs.band.iter())
             .for_each(|(a, b)| *a -= factor * *b);
         self.rhs -= factor * rhs.rhs;
+        // println!("After subtract");
+        // dbg!(&self.band);
         self.align();
+        // println!("After align");
+        // dbg!(&self.band);
         self.normalize();
+        // println!("After normalize");
+        // dbg!(&self.band);
     }
 }
 
@@ -591,7 +600,10 @@ mod tests {
 
     use rand::thread_rng;
 
-    use crate::rb_okvs::{encode, EpsilonPercent, OkvsKey, OkvsU128, OkvsValue};
+    use crate::{
+        rb_okvs::{encode, EpsilonPercent, OkvsKey, OkvsU128, OkvsValue},
+        PrimeField64x2,
+    };
 
     fn test_okvs<const W: usize, K: OkvsKey, V: OkvsValue>(
         kvs: &[(K, V)],
@@ -610,10 +622,10 @@ mod tests {
     }
     #[test]
     fn test_okvs_small() {
-        let kvs = randomize_kvs(1_000);
-        test_okvs::<576, OkvsU128, OkvsMod3>(&kvs, EpsilonPercent::Three);
-        // test_okvs::<7, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Five);
-        // test_okvs::<5, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Seven);
-        // test_okvs::<4, OkvsValueU128Array<2>, OkvsValueU128Array<2>>(&kvs, EpsilonPercent::Ten);
+        let kvs = randomize_kvs(300);
+        test_okvs::<576, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Three);
+        test_okvs::<400, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Five);
+        test_okvs::<300, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Seven);
+        test_okvs::<200, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Ten);
     }
 }

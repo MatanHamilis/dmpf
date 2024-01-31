@@ -6,7 +6,7 @@ use std::{
 use aes_prng::AesRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 
-use crate::{utils::Node, Dmpf, DmpfKey, DpfKey, DpfOutput};
+use crate::{utils::Node, Dmpf, DmpfKey, DpfKey, DpfOutput, EmptySession};
 
 pub struct BatchCodeDmpf<Output: DpfOutput> {
     hash_functions_count: usize,
@@ -102,8 +102,8 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
 }
 
 impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
-    type Session = ();
-    fn eval(&self, input: &u128, output: &mut Output) {
+    type Session = EmptySession;
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
         // Zero output buffer.
         *output = Output::default();
         let input_usize = (input >> (128 - self.input_domain_log_size)) as usize;
@@ -116,7 +116,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
             *output += cur_output
         }
     }
-    fn eval_all(&self) -> Vec<Output> {
+    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
         let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
         let input_domain_size = 1 << self.input_domain_log_size;
         let mut output = Vec::with_capacity(input_domain_size);
@@ -130,8 +130,8 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
         }
         output.into()
     }
-    fn make_session(&self) -> Self {
-        unimplemented!()
+    fn make_session(&self) -> Self::Session {
+        EmptySession
     }
 }
 
@@ -352,7 +352,7 @@ mod test {
             key_2.eval(&encoded_i, &mut output_2);
             assert_eq!(output_1, eval_all_1[i]);
             assert_eq!(output_2, eval_all_2[i]);
-            let output = output_1 - output_2;
+            let output = output_1 + output_2;
             if input_map.contains_key(&encoded_i) {
                 assert_eq!(output, input_map[&encoded_i]);
             } else {
