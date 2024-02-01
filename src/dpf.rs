@@ -215,13 +215,19 @@ impl<Output: DpfOutput> DpfKey<Output> {
     pub fn eval_all(&self) -> Vec<Output> {
         let mut cur_seeds = vec![self.root];
         let mut cur_signs = vec![self.root_bit];
+        let mut printed = false;
         for depth in 0..self.input_bits {
             let mut next_seeds = Vec::with_capacity(1 << (depth + 1));
             let mut next_signs = Vec::with_capacity(1 << (depth + 1));
             let mut cur_cw = self.cws[depth].node;
             let (cw_t_l, cw_t_r) = cur_cw.pop_first_two_bits();
             for (s, t) in cur_seeds.iter().copied().zip(cur_signs.iter().copied()) {
+                let time = Instant::now();
                 let [mut seed_l, mut seed_r] = double_prg(&s, &DOUBLE_PRG_CHILDREN);
+                if !printed {
+                    println!("prg: {}", time.elapsed().as_nanos());
+                }
+                let time = Instant::now();
                 let (mut t_l, _) = seed_l.pop_first_two_bits();
                 let (mut t_r, _) = seed_r.pop_first_two_bits();
                 if t {
@@ -230,28 +236,40 @@ impl<Output: DpfOutput> DpfKey<Output> {
                     t_l ^= cw_t_l;
                     t_r ^= cw_t_r;
                 }
+                if !printed {
+                    println!("first: {}", time.elapsed().as_nanos());
+                }
+                let time = Instant::now();
                 next_seeds.push(seed_l);
                 next_seeds.push(seed_r);
                 next_signs.push(t_l);
                 next_signs.push(t_r);
+                if !printed {
+                    println!("second: {}", time.elapsed().as_nanos());
+                    printed = true;
+                }
             }
             cur_seeds = next_seeds;
             cur_signs = next_signs;
         }
         let last_cw = self.last_cw;
-        cur_seeds
+        let mut output: Vec<_> = cur_seeds
             .into_iter()
             .zip(cur_signs.into_iter())
             .map(|(s, t)| {
                 let my_last_cw = Output::from(s);
-                let output = if t { my_last_cw + last_cw } else { my_last_cw };
-                if self.root_bit {
-                    output.neg()
-                } else {
-                    output
-                }
+                my_last_cw + last_cw * t
+                // if self.root_bit {
+                //     output.neg()
+                // } else {
+                //     output
+                // }
             })
-            .collect()
+            .collect();
+        if self.root_bit {
+            output.iter_mut().for_each(|v| *v = v.neg())
+        }
+        output
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {

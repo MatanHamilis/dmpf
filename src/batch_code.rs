@@ -224,7 +224,7 @@ where
     let mut index_to_map = (rng.next_u64() as usize) % indices.len();
     assert!(indices_left.remove(&index_to_map));
     let mut iterations_without_advance = 0;
-    for _ in 0..(indices.len() * indices.len()) {
+    for _ in 0..(indices.len() * indices.len() * indices.len()) {
         let item_to_map = indices[index_to_map];
         // Sample random function
         let function_id = bucket_randomness % hash_functions_count;

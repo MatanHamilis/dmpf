@@ -124,14 +124,12 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
 }
 
 pub struct OkvsDmpf<const W: usize, Output: DpfOutput> {
-    point_count: usize,
     epsilon_percent: EpsilonPercent,
     _phantom: PhantomData<Output>,
 }
 impl<const W: usize, Output: DpfOutput> OkvsDmpf<W, Output> {
-    pub fn new(point_count: usize, epsilon_percent: EpsilonPercent) -> Self {
+    pub fn new(epsilon_percent: EpsilonPercent) -> Self {
         Self {
-            point_count,
             epsilon_percent,
             _phantom: PhantomData,
         }
@@ -149,9 +147,9 @@ impl<const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Output> for OkvsDmpf<W,
         for i in 0..points.len() - 1 {
             assert!(points[i].0 < points[i + 1].0);
         }
-        if points.len() != self.point_count {
-            return None;
-        }
+        // if points.len() != self.point_count {
+        //     return None;
+        // }
         let t = points.len();
         // assert all inputs and all outputs are of the same length.
         let input_len = input_length;
@@ -444,7 +442,7 @@ mod test {
         const W: usize = 400;
         const POINTS: usize = 30;
         const INPUT_SIZE: usize = 9;
-        let scheme = OkvsDmpf::<W, Node>::new(POINTS, crate::rb_okvs::EpsilonPercent::Ten);
+        let scheme = OkvsDmpf::<W, Node>::new(crate::rb_okvs::EpsilonPercent::Ten);
         let mut rng = thread_rng();
         let mut input_map = HashMap::with_capacity(POINTS);
         while input_map.len() < POINTS {

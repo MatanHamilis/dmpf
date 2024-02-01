@@ -21,6 +21,43 @@ pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
     blocks[1][0] ^= children[1];
     unsafe { std::mem::transmute(blocks) }
 }
+// pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) {
+//     // The less interesting case
+//     if input.len() < 8 {
+//         input
+//             .iter()
+//             .zip(output.chunks_exact_mut(2))
+//             .for_each(|(i, o)| {
+//                 let d = double_prg(i, children);
+//                 (o[0], o[1]) = (d[0], d[1]);
+//             })
+//     };
+
+//     input
+//         .chunks_exact(8)
+//         .zip(output.chunks_exact_mut(16))
+//         .for_each(|(i, o)| {
+//             for idx in 0..8 {
+//                 o[2 * idx] = i[idx];
+//                 o[2 * idx + 1] = i[idx];
+//             }
+//             let i_u8 = unsafe { std::slice::from_raw_parts(i.as_ptr() as *const Block, 8) };
+//             let o_u8 = unsafe { std::slice::from_raw_parts_mut(o.as_mut_ptr() as *mut Block, 16) };
+//             for idx in 0..8 {
+//                 i_u8[2 * idx][0] ^= children[0];
+//                 o_u8[2 * idx + 1][0] ^= children[1];
+//             }
+//             AES.encrypt_blocks(o_u8);
+//         });
+//     blocks[0][0] ^= children[0];
+//     blocks[1][0] ^= children[1];
+//     AES.encrypt_blocks(&mut blocks);
+//     xor_arrays(&mut blocks[0].into(), input.as_ref());
+//     xor_arrays(&mut blocks[1].into(), input.as_ref());
+//     blocks[0][0] ^= children[0];
+//     blocks[1][0] ^= children[1];
+//     unsafe { std::mem::transmute(blocks) }
+// }
 pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
     let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 3];
     blocks[0][0] ^= children[0];

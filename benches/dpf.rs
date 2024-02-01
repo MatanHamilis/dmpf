@@ -1,7 +1,11 @@
+use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use dmpf::{Dmpf, DmpfKey, DpfDmpf, DpfKey, DpfOutput, Node, PrimeField64, PrimeField64x2};
+use dmpf::{
+    batch_code::BatchCodeDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf, DpfKey, DpfOutput, LogN,
+    Node, PrimeField64, PrimeField64x2,
+};
 use rand::{thread_rng, RngCore};
 
 const INPUT_LENS: (usize, usize) = (5, 20);
@@ -29,75 +33,123 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
     c: &mut Criterion,
     id: &str,
     d: &D,
-    input_lens: (usize, usize),
-    points: Vec<usize>,
+    input_len: usize,
+    points: usize,
 ) {
     let mut rng = thread_rng();
-    for input_len in input_lens.0..input_lens.1 {
-        for points_count in points.iter().copied() {
-            if points_count > (1 << (input_len - 1)) {
-                continue;
-            }
-            let inputs = make_inputs::<F>(input_len, points_count);
-            // Generating the key
-            c.bench_with_input(
-                criterion::BenchmarkId::new(
-                    format!("{}/Keygen", id),
-                    format!("{},{}", input_len.to_string(), points_count),
-                ),
-                &(input_len, inputs.clone()),
-                |b, input| {
-                    let input_len = input.0;
-                    let inputs = &input.1;
-                    b.iter(|| {
-                        d.try_gen(input_len, &inputs, &mut rng).unwrap();
-                    })
-                },
-            );
-            c.bench_with_input(
-                criterion::BenchmarkId::new(
-                    format!("{}/EvalSingle", id),
-                    format!("{},{}", input_len.to_string(), points_count),
-                ),
-                &(input_len, inputs.clone()),
-                |b, input| {
-                    let input_len = input.0;
-                    let inputs = &input.1;
-                    let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-                    let random_point = rng.next_u64() % (1 << input_len);
-                    let random_point_encoded = (random_point as u128) << (128 - input_len);
-                    let mut f = F::default();
-                    b.iter(|| {
-                        k_0.eval(&random_point_encoded, &mut f);
-                    })
-                },
-            );
-            c.bench_with_input(
-                criterion::BenchmarkId::new(
-                    format!("{}/EvalAll", id),
-                    format!("{},{}", input_len.to_string(), points_count),
-                ),
-                &(input_len, inputs),
-                |b, input| {
-                    let input_len = input.0;
-                    let inputs = &input.1;
-                    let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-                    b.iter(|| {
-                        k_0.eval_all();
-                    })
-                },
-            );
-        }
+    if points > (1 << (input_len - 1)) {
+        return;
     }
+    let inputs = make_inputs::<F>(input_len, points);
+    // Generating the key
+    c.bench_with_input(
+        criterion::BenchmarkId::new(
+            format!("{}/Keygen", id),
+            format!("{},{}", input_len.to_string(), points),
+        ),
+        &(input_len, inputs.clone()),
+        |b, input| {
+            let input_len = input.0;
+            let inputs = &input.1;
+            b.iter(|| {
+                d.try_gen(input_len, &inputs, &mut rng).unwrap();
+            })
+        },
+    );
+    c.bench_with_input(
+        criterion::BenchmarkId::new(
+            format!("{}/EvalSingle", id),
+            format!("{},{}", input_len.to_string(), points),
+        ),
+        &(input_len, inputs.clone()),
+        |b, input| {
+            let input_len = input.0;
+            let inputs = &input.1;
+            let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+            let random_point = rng.next_u64() % (1 << input_len);
+            let random_point_encoded = (random_point as u128) << (128 - input_len);
+            let mut f = F::default();
+            b.iter(|| {
+                k_0.eval(&random_point_encoded, &mut f);
+            })
+        },
+    );
+    c.bench_with_input(
+        criterion::BenchmarkId::new(
+            format!("{}/EvalAll", id),
+            format!("{},{}", input_len.to_string(), points),
+        ),
+        &(input_len, inputs),
+        |b, input| {
+            let input_len = input.0;
+            let inputs = &input.1;
+            let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+            b.iter(|| {
+                k_0.eval_all();
+            })
+        },
+    );
 }
 
 fn bench_dpf_dmpf(c: &mut Criterion) {
     let dpf = DpfDmpf::new();
-    let points = POINTS.to_vec();
-    bench_dmpf::<PrimeField64x2, _>(c, "dpf_dmpf", &dpf, INPUT_LENS, points);
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+        for points in POINTS {
+            bench_dmpf::<PrimeField64x2, _>(c, "dpf_dmpf", &dpf, input_len, points);
+        }
+    }
+}
+fn match_logn(points: usize) -> Option<LogN> {
+    Some(if points < 1 << 10 {
+        LogN::Ten
+    } else if points < 1 << 14 {
+        LogN::Fourteen
+    } else if points < 1 << 16 {
+        LogN::Sixteen
+    } else if points < 1 << 18 {
+        LogN::Eighteen
+    } else if points < 1 << 20 {
+        LogN::Twenty
+    } else if points < 1 << 24 {
+        LogN::TwentyFour
+    } else {
+        return None;
+    })
+}
+fn bench_okvs_dmpf(c: &mut Criterion) {
+    const LAMBDA: usize = 40;
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+        for points in POINTS {
+            let w = g(
+                LAMBDA,
+                dmpf::EpsilonPercent::Ten,
+                match_logn(points).unwrap(),
+            );
+            match w {
+                168 => {
+                    let dpf = OkvsDmpf::<168, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
+                183 => {
+                    let dpf = OkvsDmpf::<183, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
+                _ => panic!("w missing: {}", w),
+            }
+        }
+    }
 }
 
-fn bench_dpf(c: &mut Criterion) {
+fn bench_batch_code_dmpf(c: &mut Criterion) {
+    let dpf = BatchCodeDmpf::<PrimeField64x2>::new(4, 50);
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+        for points in POINTS {
+            bench_dmpf::<PrimeField64x2, _>(c, "batch_code", &dpf, input_len, points);
+        }
+    }
+}
+
+fn bench_dpf_single(c: &mut Criterion) {
     let mut rng = thread_rng();
     for input_len in INPUT_LENS.0..INPUT_LENS.1 {
         let roots = (Node::random(&mut rng), Node::random(&mut rng));
@@ -140,5 +192,11 @@ fn bench_dpf(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_dpf, bench_dpf_dmpf);
+criterion_group!(
+    benches,
+    bench_batch_code_dmpf,
+    bench_okvs_dmpf,
+    bench_dpf_single,
+    bench_dpf_dmpf
+);
 criterion_main!(benches);
