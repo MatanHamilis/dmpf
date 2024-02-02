@@ -261,10 +261,6 @@ impl<Output: DpfOutput> DpfKey<Output> {
                 }
             })
             .collect()
-        // if self.root_bit {
-        //     output.iter_mut().for_each(|v| *v = v.neg())
-        // }
-        // output
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {

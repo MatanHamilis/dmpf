@@ -23,7 +23,7 @@ pub fn double_prg(input: &Node, children: &[u8; 2]) -> [Node; 2] {
     unsafe { std::mem::transmute(blocks) }
 }
 pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) {
-    const BLOCK_SIZE_INPUT: usize = 1;
+    const BLOCK_SIZE_INPUT: usize = 8;
     // The less interesting case
     if input.len() < BLOCK_SIZE_INPUT {
         input
