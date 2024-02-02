@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use super::BITS_OF_SECURITY;
 use crate::prg::double_prg;
+use crate::prg::double_prg_many;
 use crate::prg::many_prg;
 use crate::prg::DOUBLE_PRG_CHILDREN;
 use crate::utils::BitVec;
@@ -218,37 +219,33 @@ impl<Output: DpfOutput> DpfKey<Output> {
         let mut printed = false;
         for depth in 0..self.input_bits {
             let mut next_seeds = Vec::with_capacity(1 << (depth + 1));
+            unsafe { next_seeds.set_len(1 << (depth + 1)) };
             let mut next_signs = Vec::with_capacity(1 << (depth + 1));
+            unsafe { next_signs.set_len(1 << (depth + 1)) };
+            double_prg_many(&cur_seeds, &DOUBLE_PRG_CHILDREN, &mut next_seeds);
             let mut cur_cw = self.cws[depth].node;
             let (cw_t_l, cw_t_r) = cur_cw.pop_first_two_bits();
-            for (s, t) in cur_seeds.iter().copied().zip(cur_signs.iter().copied()) {
-                let time = Instant::now();
-                let [mut seed_l, mut seed_r] = double_prg(&s, &DOUBLE_PRG_CHILDREN);
-                if !printed {
-                    println!("prg: {}", time.elapsed().as_nanos());
-                }
-                let time = Instant::now();
-                let (mut t_l, _) = seed_l.pop_first_two_bits();
-                let (mut t_r, _) = seed_r.pop_first_two_bits();
-                if t {
-                    seed_l ^= &cur_cw;
-                    seed_r ^= &cur_cw;
-                    t_l ^= cw_t_l;
-                    t_r ^= cw_t_r;
-                }
-                if !printed {
-                    println!("first: {}", time.elapsed().as_nanos());
-                }
-                let time = Instant::now();
-                next_seeds.push(seed_l);
-                next_seeds.push(seed_r);
-                next_signs.push(t_l);
-                next_signs.push(t_r);
-                if !printed {
-                    println!("second: {}", time.elapsed().as_nanos());
-                    printed = true;
-                }
-            }
+            next_seeds
+                .chunks_exact_mut(2)
+                .zip(next_signs.chunks_exact_mut(2))
+                .zip(cur_signs.iter().copied())
+                .for_each(|((seeds, signs), cur_sign)| {
+                    // for (s, t) in cur_seeds.iter().copied().zip(cur_signs.iter().copied()) {
+                    let mut seed_l = seeds[0];
+                    let mut seed_r = seeds[1];
+                    let (mut t_l, _) = seed_l.pop_first_two_bits();
+                    let (mut t_r, _) = seed_r.pop_first_two_bits();
+                    if cur_sign {
+                        seed_l ^= &cur_cw;
+                        seed_r ^= &cur_cw;
+                        t_l ^= cw_t_l;
+                        t_r ^= cw_t_r;
+                    }
+                    seeds[0] = seed_l;
+                    seeds[1] = seed_r;
+                    signs[0] = t_l;
+                    signs[1] = t_r;
+                });
             cur_seeds = next_seeds;
             cur_signs = next_signs;
         }
