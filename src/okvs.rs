@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, u128};
 
 use crate::{
+    prg::double_prg_many,
     rb_okvs::{EncodedOkvs, EpsilonPercent, OkvsValue},
     EmptySession,
 };
@@ -74,29 +75,42 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
         let mut seed = vec![self.seed];
         for i in 0..input_length {
             let mut next_sign = Vec::with_capacity(1 << (i + 1));
+            unsafe { next_sign.set_len(1 << (i + 1)) };
             let mut next_seed = Vec::with_capacity(1 << (i + 1));
+            unsafe { next_seed.set_len(1 << (i + 1)) };
+            double_prg_many(&seed, &DOUBLE_PRG_CHILDREN, &mut next_seed);
             let bits_left = (BITS_OF_SECURITY - i) & (BITS_OF_SECURITY - 1);
-            for k in 0..1 << i {
-                let current_node = (k as u128) << bits_left;
-                let mut correction_seed =
-                    OkvsDmpf::<W, Output>::correct(current_node.into(), sign[k], &self.cws[i]);
-                let (correction_sign_left, correction_sign_right) =
-                    correction_seed.pop_first_two_bits();
-                let [mut seed_prg_false, mut seed_prg_true] =
-                    double_prg(&seed[k], &DOUBLE_PRG_CHILDREN);
-                let [sign_corr_false, sign_corr_true] =
-                    [correction_sign_left, correction_sign_right];
-                let (sign_prg_false, _) = seed_prg_false.pop_first_two_bits();
-                let (sign_prg_true, _) = seed_prg_true.pop_first_two_bits();
-                let seed_false = &correction_seed ^ &seed_prg_false;
-                let seed_true = &correction_seed ^ &seed_prg_true;
-                let sign_false = sign_corr_false ^ sign_prg_false;
-                let sign_true = sign_corr_true ^ sign_prg_true;
-                next_seed.push(seed_false);
-                next_seed.push(seed_true);
-                next_sign.push(sign_false);
-                next_sign.push(sign_true);
-            }
+            next_seed
+                .chunks_exact_mut(2)
+                .zip(next_sign.chunks_exact_mut(2))
+                .enumerate()
+                .for_each(|(k, (seeds, signs))| {
+                    // }
+                    // for k in 0..1 << i {
+                    let current_node = (k as u128) << bits_left;
+                    let mut correction_seed =
+                        OkvsDmpf::<W, Output>::correct(current_node.into(), sign[k], &self.cws[i]);
+                    let (correction_sign_left, correction_sign_right) =
+                        correction_seed.pop_first_two_bits();
+                    let mut seed_prg_false = seeds[0];
+                    let mut seed_prg_true = seeds[1];
+                    let [sign_corr_false, sign_corr_true] =
+                        [correction_sign_left, correction_sign_right];
+                    let (sign_prg_false, _) = seed_prg_false.pop_first_two_bits();
+                    let (sign_prg_true, _) = seed_prg_true.pop_first_two_bits();
+                    let seed_false = &correction_seed ^ &seed_prg_false;
+                    let seed_true = &correction_seed ^ &seed_prg_true;
+                    let sign_false = sign_corr_false ^ sign_prg_false;
+                    let sign_true = sign_corr_true ^ sign_prg_true;
+                    seeds[0] = seed_false;
+                    seeds[1] = seed_true;
+                    signs[0] = sign_false;
+                    signs[1] = sign_true;
+                    // next_seed.push(seed_false);
+                    // next_seed.push(seed_true);
+                    // next_sign.push(sign_false);
+                    // next_sign.push(sign_true);
+                });
             seed = next_seed;
             sign = next_sign;
         }
