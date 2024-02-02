@@ -216,7 +216,6 @@ impl<Output: DpfOutput> DpfKey<Output> {
     pub fn eval_all(&self) -> Vec<Output> {
         let mut cur_seeds = vec![self.root];
         let mut cur_signs = vec![self.root_bit];
-        let mut printed = false;
         for depth in 0..self.input_bits {
             let mut next_seeds = Vec::with_capacity(1 << (depth + 1));
             unsafe { next_seeds.set_len(1 << (depth + 1)) };
@@ -230,7 +229,6 @@ impl<Output: DpfOutput> DpfKey<Output> {
                 .zip(next_signs.chunks_exact_mut(2))
                 .zip(cur_signs.iter().copied())
                 .for_each(|((seeds, signs), cur_sign)| {
-                    // for (s, t) in cur_seeds.iter().copied().zip(cur_signs.iter().copied()) {
                     let mut seed_l = seeds[0];
                     let mut seed_r = seeds[1];
                     let (mut t_l, _) = seed_l.pop_first_two_bits();
@@ -250,23 +248,23 @@ impl<Output: DpfOutput> DpfKey<Output> {
             cur_signs = next_signs;
         }
         let last_cw = self.last_cw;
-        let mut output: Vec<_> = cur_seeds
+        cur_seeds
             .into_iter()
             .zip(cur_signs.into_iter())
             .map(|(s, t)| {
                 let my_last_cw = Output::from(s);
-                my_last_cw + last_cw * t
-                // if self.root_bit {
-                //     output.neg()
-                // } else {
-                //     output
-                // }
+                let o = if t { my_last_cw + last_cw } else { my_last_cw };
+                if self.root_bit {
+                    o.neg()
+                } else {
+                    o
+                }
             })
-            .collect();
-        if self.root_bit {
-            output.iter_mut().for_each(|v| *v = v.neg())
-        }
-        output
+            .collect()
+        // if self.root_bit {
+        //     output.iter_mut().for_each(|v| *v = v.neg())
+        // }
+        // output
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {
