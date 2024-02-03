@@ -35,12 +35,13 @@ pub struct OkvsDmpfKey<const W: usize, Output: DpfOutput> {
     sign: bool,
     cws: Vec<Okvs<W, Node>>,
     last_cw: Okvs<W, Output>,
+    point_count: usize,
     _p: PhantomData<Output>,
 }
 
 impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Output> {
     type Session = EmptySession;
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         let input_length = self.cws.len();
         let mut seed = self.seed;
         let mut sign = self.sign;
@@ -69,7 +70,10 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
             node_output
         }
     }
-    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
+    fn point_count(&self) -> usize {
+        self.point_count
+    }
+    fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let input_length = self.cws.len();
         let mut sign = vec![self.sign];
         let mut seed = vec![self.seed];
@@ -106,10 +110,6 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
                     seeds[1] = seed_true;
                     signs[0] = sign_false;
                     signs[1] = sign_true;
-                    // next_seed.push(seed_false);
-                    // next_seed.push(seed_true);
-                    // next_sign.push(sign_false);
-                    // next_sign.push(sign_true);
                 });
             seed = next_seed;
             sign = next_sign;
@@ -131,9 +131,6 @@ impl<const W: usize, Output: DpfOutput> DmpfKey<Output> for OkvsDmpfKey<W, Outpu
             })
             .collect::<Vec<_>>()
             .into()
-    }
-    fn make_session(&self) -> Self::Session {
-        EmptySession
     }
 }
 
@@ -264,6 +261,7 @@ impl<const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Output> for OkvsDmpf<W,
             sign: sign_0,
             cws: cws.clone(),
             last_cw: last_cw.clone(),
+            point_count: points.len(),
             _p: PhantomData,
         };
         let second_key = OkvsDmpfKey::<W, Output> {
@@ -271,6 +269,7 @@ impl<const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Output> for OkvsDmpf<W,
             sign: sign_1,
             cws,
             last_cw,
+            point_count: points.len(),
             _p: PhantomData,
         };
         Some((first_key, second_key))

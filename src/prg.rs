@@ -113,6 +113,7 @@ pub fn many_prg(
             v[0] ^= bytes[0];
             v[1] ^= bytes[1];
         });
+    output.iter_mut().for_each(|v| *v ^= *input);
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use std::ops::BitXorAssign;
 use std::ops::Neg;
 use std::ops::Sub;
 
-// pub mod big_state;
+pub mod big_state;
 mod dpf;
 pub mod field;
 mod prg;
@@ -84,15 +84,18 @@ where
     Output: DpfOutput,
 {
     type Session: DmpfSession;
-    fn make_session(&self) -> Self::Session;
+    fn point_count(&self) -> usize;
     fn eval(&self, input: &u128, output: &mut Output) {
-        self.eval_with_session(input, output, self.make_session())
+        self.eval_with_session(input, output, &mut self.make_session())
     }
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session);
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session);
     fn eval_all(&self) -> Vec<Output> {
-        self.eval_all_with_session(self.make_session())
+        self.eval_all_with_session(&mut self.make_session())
     }
-    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output>;
+    fn make_session(&self) -> Self::Session {
+        Self::Session::get_session(self.point_count())
+    }
+    fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output>;
 }
 
 pub(crate) fn random_u128<R: CryptoRng + RngCore>(rng: &mut R) -> u128 {

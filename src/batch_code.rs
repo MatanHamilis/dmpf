@@ -29,6 +29,7 @@ pub struct BatchCodeDmpfKey<Output: DpfOutput> {
     dpf_input_length: usize,
     buckets: Vec<DpfKey<Output>>,
     hash_functions: HashFunctionIndex,
+    point_count: usize,
 }
 
 impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
@@ -90,12 +91,14 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
                 dpf_input_length,
                 buckets: dpfs_0,
                 hash_functions: hash_functions.clone(),
+                point_count: inputs.len(),
             },
             BatchCodeDmpfKey {
                 input_domain_log_size: input_length,
                 dpf_input_length,
                 buckets: dpfs_1,
                 hash_functions,
+                point_count: inputs.len(),
             },
         ))
     }
@@ -103,7 +106,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
 
 impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
     type Session = EmptySession;
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         // Zero output buffer.
         *output = Output::default();
         let input_usize = (input >> (128 - self.input_domain_log_size)) as usize;
@@ -116,7 +119,10 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
             *output += cur_output
         }
     }
-    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
+    fn point_count(&self) -> usize {
+        self.point_count
+    }
+    fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
         let input_domain_size = 1 << self.input_domain_log_size;
         let mut output = Vec::with_capacity(input_domain_size);
@@ -129,9 +135,6 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
             output.push(output_cur);
         }
         output.into()
-    }
-    fn make_session(&self) -> Self::Session {
-        EmptySession
     }
 }
 

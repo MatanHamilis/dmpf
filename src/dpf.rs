@@ -53,7 +53,7 @@ pub struct DpfDmpfKey<Output> {
 }
 impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
     type Session = EmptySession;
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: Self::Session) {
+    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         *output = self
             .dpf_keys
             .iter()
@@ -64,10 +64,10 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
             })
             .sum();
     }
-    fn make_session(&self) -> Self::Session {
-        EmptySession
+    fn point_count(&self) -> usize {
+        self.dpf_keys.len()
     }
-    fn eval_all_with_session(&self, session: Self::Session) -> Vec<Output> {
+    fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let time = Instant::now();
         let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
         self.dpf_keys[1..].iter().for_each(|k| {

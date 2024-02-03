@@ -164,10 +164,18 @@ impl Node {
         let index = 127 - index;
         self.0 >> index & 1 == 1
     }
+    pub fn get_bit_lsb(&self, index: usize) -> bool {
+        ((self.0 >> index) & 1) == 1
+    }
 
     pub fn set_bit(&mut self, index: usize, value: bool) {
         // let (cell, bit) = Self::coordinates(index);
         let index = 127 - index;
+        let mask: u128 = !(1 << index);
+        self.0 = (self.0 & mask) ^ ((value as u128) << index)
+    }
+    pub fn set_bit_lsb(&mut self, index: usize, value: bool) {
+        // let (cell, bit) = Self::coordinates(index);
         let mask: u128 = !(1 << index);
         self.0 = (self.0 & mask) ^ ((value as u128) << index)
     }
@@ -179,6 +187,15 @@ impl Node {
     pub fn mask(&mut self, bits: usize) {
         let mask = ((1u128 << bits) - 1) << ((BITS_OF_SECURITY - bits) & (BITS_OF_SECURITY - 1));
         self.0 &= mask;
+    }
+    pub fn mask_lsbs(&mut self, bits: usize) {
+        let mask = !0u128 >> (128 - bits);
+        // let mask = (1 << bits) - 1;
+        self.0 &= mask;
+    }
+    pub fn mask_bits_lsbs(&mut self, from: usize, to: usize) {
+        let mask = ((!0u128) >> (128 - to + from)) << from;
+        self.0 &= !mask;
     }
     pub fn cmp_first_bits(&self, other: &Self, i: usize) -> Ordering {
         if i >= BITS_OF_SECURITY {
