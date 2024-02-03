@@ -60,14 +60,6 @@ pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) 
                 o_u8[2 * idx + 1][0] ^= children[1];
             }
         });
-    // blocks[0][0] ^= children[0];
-    // blocks[1][0] ^= children[1];
-    // AES.encrypt_blocks(&mut blocks);
-    // xor_arrays(&mut blocks[0].into(), input.as_ref());
-    // xor_arrays(&mut blocks[1].into(), input.as_ref());
-    // blocks[0][0] ^= children[0];
-    // blocks[1][0] ^= children[1];
-    // unsafe { std::mem::transmute(blocks) }
 }
 pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
     let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 3];

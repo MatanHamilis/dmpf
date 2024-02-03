@@ -69,11 +69,6 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                 let current_seed_1 = seed_1[idx];
                 let [seed_left_0, seed_right_0] = double_prg(&current_seed_0, &DOUBLE_PRG_CHILDREN);
                 let [seed_left_1, seed_right_1] = double_prg(&current_seed_1, &DOUBLE_PRG_CHILDREN);
-                println!("Expanding:");
-                dbg!(&seed_left_0);
-                dbg!(&seed_left_1);
-                dbg!(&seed_right_0);
-                dbg!(&seed_right_1);
                 let delta_seed_left = seed_left_0 ^ seed_left_1;
                 let delta_seed_right = seed_right_0 ^ seed_right_1;
 
@@ -81,8 +76,6 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                 new_signs_0_right.fill_with_seed(&current_seed_0, 1);
                 new_signs_1_left.fill_with_seed(&current_seed_1, 0);
                 new_signs_1_right.fill_with_seed(&current_seed_1, 1);
-                dbg!((new_signs_0_right.get_bit(0), new_signs_0_right.get_bit(1)));
-                dbg!((new_signs_1_right.get_bit(0), new_signs_1_right.get_bit(1)));
                 new_signs_delta_left.xor_into(&new_signs_0_left, &new_signs_1_left);
                 new_signs_delta_right.xor_into(&new_signs_0_right, &new_signs_1_right);
 
@@ -124,7 +117,6 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                         new_signs_1_right.fill_with_seed(&current_seed_1, 1);
                     }
 
-                    println!("Correcting 0:");
                     let correct_seed_0 = cw.correct(
                         signs_0.iter(idx),
                         has_left,
@@ -132,7 +124,6 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                         &mut new_signs_0_left,
                         &mut new_signs_0_right,
                     );
-                    println!("Correcting 1:");
                     let correct_seed_1 = cw.correct(
                         signs_1.iter(idx),
                         has_left,
@@ -142,53 +133,21 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                     );
 
                     assert!(has_left | has_right);
-                    dbg!(correct_seed_0);
-                    dbg!(correct_seed_1);
 
                     if has_left {
-                        println!("has_left");
                         next_seed_0[next_position] = seed_left_0 ^ correct_seed_0;
                         next_seed_1[next_position] = seed_left_1 ^ correct_seed_1;
                         next_signs_0.set_signs(next_position, &new_signs_0_left);
                         next_signs_1.set_signs(next_position, &new_signs_1_left);
-                        dbg!(&new_signs_0_left.get_bit(0));
-                        dbg!(&new_signs_1_left.get_bit(0));
-                        dbg!(&new_signs_0_left.get_bit(1));
-                        dbg!(&new_signs_1_left.get_bit(1));
                         next_position += 1;
                     }
-                    // else {
-                    //     println!("NOT has_left");
-                    //     println!("Evaling:");
-                    //     dbg!(&seed_left_0);
-                    //     dbg!(&seed_left_1);
-                    //     for i in 0..t {
-                    //         assert_eq!(new_signs_0_left.get_bit(i), new_signs_1_left.get_bit(i));
-                    //     }
-                    //     assert_eq!(seed_left_0 ^ correct_seed_0, seed_left_1 ^ correct_seed_1);
-                    // }
                     if has_right {
-                        println!("has_right");
-                        dbg!(&new_signs_0_right.get_bit(0));
-                        dbg!(&new_signs_1_right.get_bit(0));
-                        dbg!(&new_signs_0_right.get_bit(1));
-                        dbg!(&new_signs_1_right.get_bit(1));
                         next_seed_0[next_position] = seed_right_0 ^ correct_seed_0;
                         next_seed_1[next_position] = seed_right_1 ^ correct_seed_1;
                         next_signs_0.set_signs(next_position, &new_signs_0_right);
                         next_signs_1.set_signs(next_position, &new_signs_1_right);
                         next_position += 1;
                     }
-                    // else {
-                    //     println!("NOT has_right");
-                    //     println!("Evaling:");
-                    //     dbg!(&seed_right_0);
-                    //     dbg!(&seed_right_1);
-                    //     for i in 0..t {
-                    //         assert_eq!(new_signs_0_right.get_bit(i), new_signs_1_right.get_bit(i));
-                    //     }
-                    //     assert_eq!(seed_right_0 ^ correct_seed_0, seed_right_1 ^ correct_seed_1);
-                    // }
                 });
             cws.push(cw);
             (
