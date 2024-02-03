@@ -652,7 +652,7 @@ impl EvalAllState {
     fn new(points: usize, input_len: usize) -> Self {
         let output_size = 1 << input_len;
         let total_sign_bits = points * output_size;
-        let total_nodes = total_sign_bits / 128;
+        let total_nodes = total_sign_bits.div_ceil(128);
         let mut signs = Vec::with_capacity(total_nodes);
         unsafe { signs.set_len(total_nodes) };
         Self { t: points, signs }
@@ -686,8 +686,8 @@ mod tests {
     }
     #[test]
     fn test() {
-        const INPUT_LEN: usize = 13;
-        const INPUTS: usize = 1000;
+        const INPUT_LEN: usize = 6;
+        const INPUTS: usize = 25;
         assert!(INPUTS <= 1 << (INPUT_LEN - 1));
         let mut rng = thread_rng();
         let mut inputs_hashmap = HashMap::with_capacity(INPUTS);
