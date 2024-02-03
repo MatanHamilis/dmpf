@@ -1,6 +1,3 @@
-use std::marker::PhantomData;
-
-use aes::cipher::typenum::bit;
 use rand::{CryptoRng, RngCore};
 
 use crate::{
@@ -11,7 +8,7 @@ use crate::{
 
 pub struct BigStateDmpf;
 impl BigStateDmpf {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self
     }
 }
@@ -588,6 +585,7 @@ impl KeyGenSigns {
         SignsIter::new(&self.1, self.coordinates(point), self.0)
     }
 }
+
 pub struct BigStateDmpfKey<Output: DpfOutput> {
     sign: bool,
     root: Node,
@@ -602,14 +600,13 @@ fn u128_get_bit(v: u128, bit_idx: usize) -> bool {
 pub struct BigStateSession {
     sign: Signs,
     new_sign: Signs,
-    eval_all_sign: Signs,
 }
+
 impl DmpfSession for BigStateSession {
     fn get_session(kvs_count: usize) -> Self {
         Self {
             sign: Signs::new(kvs_count),
             new_sign: Signs::new(kvs_count),
-            eval_all_sign: Signs::new(kvs_count),
         }
     }
 }
@@ -653,11 +650,9 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
         session_left.zero();
         session_left.set_bit(0, self.sign);
         eval_all_state.put_sign(0, &session_left);
-        let t = self.point_count();
         for depth in 0..input_len {
             let cur_cw = &self.cws[depth];
             for path_idx in (0..1 << depth).rev() {
-                let corrediate_start = eval_all_state.coordinates(path_idx, 0);
                 let current_seed = seeds[path_idx];
                 session_left.fill_with_seed(&current_seed, 0);
                 session_right.fill_with_seed(&current_seed, 1);
@@ -692,7 +687,6 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
 }
 struct EvalAllState {
     t: usize,
-    input_len: usize,
     signs: Vec<Node>,
 }
 impl EvalAllState {
@@ -702,11 +696,7 @@ impl EvalAllState {
         let total_nodes = total_sign_bits / 128;
         let mut signs = Vec::with_capacity(total_nodes);
         unsafe { signs.set_len(total_nodes) };
-        Self {
-            t: points,
-            input_len,
-            signs,
-        }
+        Self { t: points, signs }
     }
     fn coordinates(&self, point: usize, bit_idx: usize) -> usize {
         self.t * point + bit_idx
@@ -727,13 +717,10 @@ impl EvalAllState {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use rand::{thread_rng, RngCore};
-
-    use crate::{big_state::BigStateDmpf, rb_okvs::OkvsValue, Dmpf, DmpfKey, PrimeField64x2};
-
     use super::{Signs, SignsCW};
+    use crate::{big_state::BigStateDmpf, rb_okvs::OkvsValue, Dmpf, DmpfKey, PrimeField64x2};
+    use rand::{thread_rng, RngCore};
+    use std::collections::HashMap;
 
     fn encode_input(v: u128, input_len: usize) -> u128 {
         v << (128 - input_len)

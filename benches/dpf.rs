@@ -1,10 +1,10 @@
 use core::panic;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use dmpf::{
-    batch_code::BatchCodeDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf, DpfKey, DpfOutput, LogN,
-    Node, PrimeField64, PrimeField64x2,
+    batch_code::BatchCodeDmpf, big_state::BigStateDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf,
+    DpfKey, DpfOutput, LogN, Node, PrimeField64x2,
 };
 use rand::{thread_rng, RngCore};
 
@@ -69,8 +69,9 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             let random_point = rng.next_u64() % (1 << input_len);
             let random_point_encoded = (random_point as u128) << (128 - input_len);
             let mut f = F::default();
+            let mut session = k_0.make_session();
             b.iter(|| {
-                k_0.eval(&random_point_encoded, &mut f);
+                k_0.eval_with_session(&random_point_encoded, &mut f, &mut session);
             })
         },
     );
@@ -84,8 +85,9 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             let input_len = input.0;
             let inputs = &input.1;
             let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+            let mut session = k_0.make_session();
             b.iter(|| {
-                k_0.eval_all();
+                k_0.eval_all_with_session(&mut session);
             })
         },
     );
@@ -192,11 +194,21 @@ fn bench_dpf_single(c: &mut Criterion) {
     }
 }
 
+fn bench_big_state_dmpf(c: &mut Criterion) {
+    let dpf = BigStateDmpf::new();
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1.min(15) {
+        for points in POINTS {
+            bench_dmpf::<PrimeField64x2, _>(c, "big_state", &dpf, input_len, points);
+        }
+    }
+}
+
 criterion_group!(
     benches,
+    bench_dpf_single,
+    // bench_dpf_dmpf
+    bench_big_state_dmpf,
     bench_batch_code_dmpf,
     bench_okvs_dmpf,
-    bench_dpf_single,
-    bench_dpf_dmpf
 );
 criterion_main!(benches);
