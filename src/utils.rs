@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use crate::field::FieldElement;
+use crate::{field::FieldElement, rb_okvs::binary_okvs::BinaryOkvsValue};
 use crate::{
     rb_okvs::{OkvsKey, OkvsValue},
     DpfOutput,
@@ -21,6 +21,14 @@ pub struct Node(u128);
 impl From<u128> for Node {
     fn from(value: u128) -> Self {
         Self(value)
+    }
+}
+impl BinaryOkvsValue for Node {
+    fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
+        Node::random(rng)
+    }
+    fn is_zero(&self) -> bool {
+        self.0 == 0
     }
 }
 impl DpfOutput for Node {}

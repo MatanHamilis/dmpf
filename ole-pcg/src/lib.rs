@@ -429,6 +429,8 @@ mod tests {
         let dense_ab = sparse_ab.to_dense();
         let dense_ab_ring = PolynomialRingElement::new(modulo.modulo(dense_ab), modulo.clone());
 
+        const W: usize = 200;
+        const BIN_W: usize = W.div_ceil(64);
         let dmpf = OkvsDmpf::new(EpsilonPercent::Ten);
         let (share_a, share_b) = share_polynomial::<2, _, PrimeField64x2, _>(
             &sparse_ab,
@@ -436,9 +438,9 @@ mod tests {
             &dmpf,
             LOG_DEGREE + 1,
         );
-        let additive_a_poly = from_share::<2, _, PrimeField64x2, OkvsDmpf<400, _>>(&share_a);
+        let additive_a_poly = from_share::<2, _, PrimeField64x2, OkvsDmpf<BIN_W, W, _>>(&share_a);
         let additive_a = PolynomialRingElement::new(modulo.modulo(additive_a_poly), modulo.clone());
-        let additive_b_poly = from_share::<2, _, PrimeField64x2, OkvsDmpf<400, _>>(&share_b);
+        let additive_b_poly = from_share::<2, _, PrimeField64x2, OkvsDmpf<BIN_W, W, _>>(&share_b);
         let additive_b = PolynomialRingElement::new(modulo.modulo(additive_b_poly), modulo.clone());
         let sum = &additive_a + &additive_b;
         assert_eq!(dense_ab_ring, sum);

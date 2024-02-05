@@ -1,3 +1,4 @@
+pub mod binary_okvs;
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -36,7 +37,7 @@ pub trait OkvsKey {
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub struct OkvsU128(u128);
 impl OkvsKey for OkvsU128 {
     fn hash_seed(&self) -> [u8; 16] {
@@ -121,81 +122,6 @@ impl AddAssign for OkvsBool {
     }
 }
 
-// #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
-// pub struct OkvsValueU128Array<const WIDTH: usize>([u128; WIDTH]);
-// impl<const WIDTH: usize> OkvsValue for OkvsValueU128Array<WIDTH> {
-//     fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
-//         Self(core::array::from_fn(|_| random_u128(&mut rng)))
-//     }
-//     fn hash_seed(&self) -> [u8; 16] {
-//         self.0[0].to_be_bytes()
-//     }
-// }
-// impl<const WIDTH: usize> OkvsValueU128Array<WIDTH> {
-//     pub fn get_bit(&self, idx: usize) -> bool {
-//         (self.0[idx / 128] >> (127 - (idx & 127))) & 1 == 1
-//     }
-// }
-
-// impl<const WIDTH: usize> Deref for OkvsValueU128Array<WIDTH> {
-//     type Target = [u128; WIDTH];
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-// impl From<u128> for OkvsValueU128Array<1> {
-//     fn from(value: u128) -> Self {
-//         [value].into()
-//     }
-// }
-
-// impl<const WIDTH: usize> DerefMut for OkvsValueU128Array<WIDTH> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.0
-//     }
-// }
-// impl<const WIDTH: usize> From<[u128; WIDTH]> for OkvsValueU128Array<WIDTH> {
-//     fn from(value: [u128; WIDTH]) -> Self {
-//         Self(value)
-//     }
-// }
-
-// impl<const WIDTH: usize> Mul<bool> for OkvsValueU128Array<WIDTH> {
-//     type Output = Self;
-//     fn mul(self, rhs: bool) -> Self::Output {
-//         let rhs_u128 = rhs as u128;
-//         Self(core::array::from_fn(|i| self.0[i] * rhs_u128))
-//     }
-// }
-// impl<const WIDTH: usize> BitXorAssign for OkvsValueU128Array<WIDTH> {
-//     fn bitxor_assign(&mut self, rhs: Self) {
-//         self.0
-//             .iter_mut()
-//             .zip(rhs.0.iter())
-//             .for_each(|(a, b)| *a ^= *b)
-//     }
-// }
-// impl<const WIDTH: usize> AddAssign for OkvsValueU128Array<WIDTH> {
-//     fn add_assign(&mut self, rhs: Self) {
-//         self.0
-//             .iter_mut()
-//             .zip(rhs.0.iter())
-//             .for_each(|(a, b)| *a ^= *b)
-//     }
-// }
-// impl<const WIDTH: usize> BitXor for OkvsValueU128Array<WIDTH> {
-//     type Output = Self;
-//     fn bitxor(mut self, rhs: Self) -> Self::Output {
-//         self ^= rhs;
-//         self
-//     }
-// }
-// impl<const WIDTH: usize> Default for OkvsValueU128Array<WIDTH> {
-//     fn default() -> Self {
-//         Self(core::array::from_fn(|_| 0u128))
-//     }
-// }
-
 #[derive(Debug, Clone, Copy)]
 struct MatrixRow<const W: usize, V: OkvsValue> {
     first_col: usize,
@@ -235,22 +161,10 @@ impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
             self.band[i] = V::default();
         }
 
-        // let mask: u64 = u64::rotate_right((1 << shift) - 1, shift);
-        // let anti_mask: u64 = !mask;
-        // self.band[0] = self.band[0].overflowing_shr(shift).0;
-        // for i in 1..W {
-        //     self.band[i] = self.band[i].rotate_right(shift);
-        //     self.band[i - 1] ^= self.band[i] & mask;
-        //     self.band[i] &= anti_mask;
-        // }
         self.first_col += shift as usize;
     }
     fn get_bit_value_uncheck(&self, column: usize) -> V {
         self.band[column - self.first_col]
-        // let bit = column - self.first_col;
-        // let cell = bit / 64;
-        // let idx = bit & 63;
-        // (self.band[column-self.first_col] >> idx) & 1 != 0
     }
 }
 

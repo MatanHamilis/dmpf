@@ -139,11 +139,11 @@ fn bench_okvs_dmpf(c: &mut Criterion) {
             );
             match w {
                 168 => {
-                    let dpf = OkvsDmpf::<168, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    let dpf = OkvsDmpf::<3, 168, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 183 => {
-                    let dpf = OkvsDmpf::<183, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    let dpf = OkvsDmpf::<3, 183, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 _ => panic!("w missing: {}", w),

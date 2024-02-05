@@ -454,7 +454,9 @@ mod tests {
         const DEGREE: usize = 1 << LOG_DEGREE;
         const WEIGHT: usize = 2;
         let mut rng = thread_rng();
-        let dmpf = OkvsDmpf::<100, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+        const W: usize = 100;
+        const BIN_W: usize = W.div_ceil(64);
+        let dmpf = OkvsDmpf::<BIN_W, W, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
         // for _ in 0..TESTS {
         let mut seed = [0u8; 16];
         rng.fill_bytes(&mut seed);
@@ -468,8 +470,8 @@ mod tests {
         ));
         let (share_a, share_b) = share_polynomial(&p, WEIGHT, &dmpf, LOG_DEGREE);
         let (eval_a, eval_b) = (
-            from_share::<2, _, PrimeField64x2, OkvsDmpf<100, PrimeField64x2>>(&share_a),
-            from_share::<2, _, PrimeField64x2, OkvsDmpf<100, PrimeField64x2>>(&share_b),
+            from_share::<2, _, PrimeField64x2, OkvsDmpf<BIN_W, W, PrimeField64x2>>(&share_a),
+            from_share::<2, _, PrimeField64x2, OkvsDmpf<BIN_W, W, PrimeField64x2>>(&share_b),
         );
         let mut reconstructed = eval_a + eval_b;
         let coeffs = &mut reconstructed.coefficients;
