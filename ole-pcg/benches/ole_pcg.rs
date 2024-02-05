@@ -83,7 +83,7 @@ fn bench_ole_pcg_nonregular_single<
             b.iter(|| gen(log_degree, compression_factor, modulo.clone(), weight, d))
         },
     );
-    let (k_0, k_1) = gen_regular(log_degree, compression_factor, modulo, weight, d);
+    let (k_0, k_1) = gen(log_degree, compression_factor, modulo, weight, d);
     c.bench_with_input(
         BenchmarkId::new(
             "expand/nonregular",
