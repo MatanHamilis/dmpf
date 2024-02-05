@@ -63,22 +63,16 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs.clone()),
         |b, input| {
-            b.iter_batched_ref(
-                || {
-                    let input_len = input.0;
-                    let inputs = &input.1;
-                    let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-                    let random_point = rng.next_u64() % (1 << input_len);
-                    let random_point_encoded = (random_point as u128) << (128 - input_len);
-                    let f = F::default();
-                    let session = k_0.make_session();
-                    (k_0, random_point_encoded, f, session)
-                },
-                |(k_0, random_point_encoded, f, session)| {
-                    k_0.eval_with_session(random_point_encoded, f, session);
-                },
-                criterion::BatchSize::NumIterations(100),
-            )
+            let input_len = input.0;
+            let inputs = &input.1;
+            let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+            let random_point = rng.next_u64() % (1 << input_len);
+            let random_point_encoded = (random_point as u128) << (128 - input_len);
+            let mut f = F::default();
+            let mut session = k_0.make_session();
+            b.iter(|| {
+                k_0.eval_with_session(&random_point_encoded, &mut f, &mut session);
+            })
         },
     );
     c.bench_with_input(
@@ -103,7 +97,7 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
                 |(k_0, session)| {
                     k_0.eval_all_with_session(session);
                 },
-                criterion::BatchSize::NumIterations(100),
+                criterion::BatchSize::NumBatches(2),
             )
         },
     );
@@ -169,7 +163,7 @@ fn bench_batch_code_dmpf(c: &mut Criterion) {
 
 fn bench_dpf_single(c: &mut Criterion) {
     let mut rng = thread_rng();
-    for input_len in INPUT_LENS.0..INPUT_LENS.1 {
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
         let roots = (Node::random(&mut rng), Node::random(&mut rng));
         let alpha = ((rng.next_u64() % (1 << input_len)) as u128) << (128 - input_len);
         let beta = PrimeField64x2::random(&mut rng);
@@ -212,7 +206,7 @@ fn bench_dpf_single(c: &mut Criterion) {
 
 fn bench_big_state_dmpf(c: &mut Criterion) {
     let dpf = BigStateDmpf::new();
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1.min(17) {
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "big_state", &dpf, input_len, points);
         }
@@ -221,7 +215,7 @@ fn bench_big_state_dmpf(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(10).configure_from_args();
+    config = Criterion::default().configure_from_args();
     targets = bench_dpf_single,
     // bench_dpf_dmpf
     bench_big_state_dmpf,
