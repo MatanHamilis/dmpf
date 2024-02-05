@@ -63,16 +63,22 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs.clone()),
         |b, input| {
-            let input_len = input.0;
-            let inputs = &input.1;
-            let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-            let random_point = rng.next_u64() % (1 << input_len);
-            let random_point_encoded = (random_point as u128) << (128 - input_len);
-            let mut f = F::default();
-            let mut session = k_0.make_session();
-            b.iter(|| {
-                k_0.eval_with_session(&random_point_encoded, &mut f, &mut session);
-            })
+            b.iter_batched_ref(
+                || {
+                    let input_len = input.0;
+                    let inputs = &input.1;
+                    let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+                    let random_point = rng.next_u64() % (1 << input_len);
+                    let random_point_encoded = (random_point as u128) << (128 - input_len);
+                    let f = F::default();
+                    let session = k_0.make_session();
+                    (k_0, random_point_encoded, f, session)
+                },
+                |(k_0, random_point_encoded, f, session)| {
+                    k_0.eval_with_session(random_point_encoded, f, session);
+                },
+                criterion::BatchSize::NumIterations(100),
+            )
         },
     );
     c.bench_with_input(
@@ -85,10 +91,20 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             let input_len = input.0;
             let inputs = &input.1;
             let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-            let mut session = k_0.make_session();
-            b.iter(|| {
-                k_0.eval_all_with_session(&mut session);
-            })
+            let session = k_0.make_session();
+            b.iter_batched_ref(
+                || {
+                    let input_len = input.0;
+                    let inputs = &input.1;
+                    let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
+                    let session = k_0.make_session();
+                    (k_0, session)
+                },
+                |(k_0, session)| {
+                    k_0.eval_all_with_session(session);
+                },
+                criterion::BatchSize::NumIterations(100),
+            )
         },
     );
 }
