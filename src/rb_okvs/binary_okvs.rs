@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
     iter::Sum,
     marker::PhantomData,
-    ops::{BitXor, BitXorAssign, Div, SubAssign},
+    ops::{BitXor, BitXorAssign, Mul, SubAssign},
 };
 
 use aes_prng::AesRng;
@@ -18,6 +18,13 @@ impl BinaryOkvsValue for OkvsU128 {
     }
     fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
         Self(random_u128(&mut rng))
+    }
+}
+impl Mul<bool> for OkvsU128 {
+    type Output = Self;
+    fn mul(mut self, rhs: bool) -> Self::Output {
+        self.0 *= rhs as u128;
+        self
     }
 }
 impl Default for OkvsU128 {
@@ -60,6 +67,7 @@ pub trait BinaryOkvsValue:
     + BitXor<Output = Self>
     + BitXorAssign
     + From<bool>
+    + Mul<bool, Output = Self>
     + Sum
 {
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self;
@@ -121,19 +129,17 @@ pub struct BinaryEncodedOkvs<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
 );
 impl<const W: usize, K: OkvsKey, V: BinaryOkvsValue> BinaryEncodedOkvs<W, K, V> {
     pub fn decode(&self, key: &K) -> V {
-        let (offset, bits) = hash_key::<W, K>(key, self.0.len());
+        let (offset, bits) = hash_key::<W, K>(&key, self.0.len());
         let slice = &self.0[offset..offset + (W * u64::BITS as usize)];
         bits.iter()
             .copied()
             .zip(slice.chunks(u64::BITS as usize))
             .map(|(mut bits, chunk)| {
-                let mut sum = V::default();
+                let mut sum: V = V::default();
                 for idx in 0..chunk.len() {
                     let bit = (bits & 1) == 1;
                     bits = bits.overflowing_shr(1).0;
-                    if bit {
-                        sum ^= chunk[idx]
-                    }
+                    sum ^= chunk[idx] * bit;
                 }
                 sum
             })
