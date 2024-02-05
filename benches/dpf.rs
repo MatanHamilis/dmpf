@@ -9,7 +9,7 @@ use dmpf::{
 use rand::{thread_rng, RngCore};
 
 const INPUT_LENS: (usize, usize) = (5, 20);
-const POINTS: [usize; 3] = [5 * 5, 14 * 14, 70 * 70];
+const POINTS: [usize; 3] = [5 * 5, 14 * 14, 66 * 66];
 
 fn make_inputs<F: DpfOutput>(input_len: usize, total_inputs: usize) -> Vec<(u128, F)> {
     let domain_size = 1 << input_len;
@@ -143,7 +143,7 @@ fn bench_okvs_dmpf(c: &mut Criterion) {
 }
 
 fn bench_batch_code_dmpf(c: &mut Criterion) {
-    let dpf = BatchCodeDmpf::<PrimeField64x2>::new(4, 50);
+    let dpf = BatchCodeDmpf::<PrimeField64x2>::new();
     for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "batch_code", &dpf, input_len, points);

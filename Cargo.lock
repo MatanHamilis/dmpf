@@ -404,6 +404,7 @@ name = "ole-pcg"
 version = "0.1.0"
 dependencies = [
  "aes-prng",
+ "criterion",
  "dmpf",
  "rand",
 ]

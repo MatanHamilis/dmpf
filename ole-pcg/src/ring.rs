@@ -32,11 +32,10 @@ impl<F: RadixTwoFftFriendFieldElement> ModuloPolynomial<F>
 {
     fn modulo(&self, mut p: DensePolynomial<F>) -> DensePolynomial<F> {
         let output_degree = 1 << self.log_n;
-        let deg_mask = output_degree - 1;
         let coeffs = &mut p.coefficients;
-        for i in output_degree..coeffs.len() {
+        for i in (output_degree..coeffs.len()).rev() {
             let c = coeffs[i];
-            coeffs[i & deg_mask] -= c;
+            coeffs[i - output_degree] -= c;
         }
         coeffs.resize(output_degree, F::zero());
         p
@@ -58,7 +57,7 @@ impl<F: RadixTwoFftFriendFieldElement, M: ModuloPolynomial<F>> PolynomialRingEle
     pub fn get_modulo(&self) -> &M {
         &self.modulo
     }
-    pub fn get_coefficients(&self) -> &DensePolynomial<F> {
+    fn get_coefficients(&self) -> &DensePolynomial<F> {
         &self.p
     }
     pub fn random<R: RngCore + CryptoRng>(rng: R, modulo: M) -> Self {
@@ -100,7 +99,10 @@ impl<'a, F: RadixTwoFftFriendFieldElement, M: ModuloPolynomial<F>> Add
     }
 }
 
-pub struct SparsePolynomialRingElement<F: RadixTwoFftFriendFieldElement, M: ModuloPolynomial<F>> {
+pub(super) struct SparsePolynomialRingElement<
+    F: RadixTwoFftFriendFieldElement,
+    M: ModuloPolynomial<F>,
+> {
     pub(crate) p: SparsePolynomial<F>,
     modulo: M,
 }
@@ -111,7 +113,7 @@ impl<F: RadixTwoFftFriendFieldElement, M: ModuloPolynomial<F>> SparsePolynomialR
     pub fn modulo(&self) -> &M {
         &self.modulo
     }
-    pub fn random<R: CryptoRng + RngCore>(rng: R, modulo: M, weight: usize) -> Self {
+    fn random<R: CryptoRng + RngCore>(rng: R, modulo: M, weight: usize) -> Self {
         SparsePolynomialRingElement::new(
             SparsePolynomial::random(rng, modulo.deg(), weight),
             modulo,

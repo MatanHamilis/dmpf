@@ -15,7 +15,7 @@ use crate::polynomial::{from_share, from_share_regular_error};
 
 mod fft;
 mod polynomial;
-mod ring;
+pub mod ring;
 enum Role {
     First,
     Second,
@@ -59,7 +59,7 @@ impl<
             tensor_product_fss,
         }
     }
-    fn expand(&self) -> (PolynomialRingElement<F, M>, PolynomialRingElement<F, M>) {
+    pub fn expand(&self) -> (PolynomialRingElement<F, M>, PolynomialRingElement<F, M>) {
         // First, compute the multiplicative shares:
         let my_polynomials = polynomials_from_seed(
             self.my_vec_seed,
@@ -142,7 +142,7 @@ impl<
             tensor_product_fss,
         }
     }
-    fn expand(&self) -> (PolynomialRingElement<F, M>, PolynomialRingElement<F, M>) {
+    pub fn expand(&self) -> (PolynomialRingElement<F, M>, PolynomialRingElement<F, M>) {
         // First, compute the multiplicative shares:
         let my_polynomials = polynomials_from_seed(
             self.my_vec_seed,
@@ -169,6 +169,10 @@ impl<
             Role::Second => tensor_product(&peer_polynomials, &my_polynomials),
         };
         let time = Instant::now();
+        assert_eq!(
+            self.tensor_product_fss.len(),
+            self.compression_factor * self.compression_factor
+        );
         let additive_share_poly: PolynomialRingElement<F, M> = self
             .tensor_product_fss
             .iter()
@@ -176,7 +180,7 @@ impl<
             .map(|((k_0, k_1), p)| {
                 let dense_poly = from_share_regular_error::<CONTAINER_SIZE, F, C, D>(
                     (*k_0, &k_1[..]),
-                    self.sparse_polynomials[0].modulo().deg() * 2 - 1,
+                    self.sparse_polynomials[0].modulo().deg() * 2,
                 );
                 let dense_poly = p.get_modulo().modulo(dense_poly);
                 let dense_ring_element =
@@ -262,7 +266,7 @@ where
     Matrix::new(output, b.len())
 }
 
-fn gen_regular<
+pub fn gen_regular<
     const CONTAINER_SIZE: usize,
     F: RadixTwoFftFriendFieldElement,
     C: SmallFieldContainer<CONTAINER_SIZE, F>,
@@ -332,7 +336,7 @@ fn gen_regular<
     );
     (first, second)
 }
-fn gen<
+pub fn gen<
     const CONTAINER_SIZE: usize,
     F: RadixTwoFftFriendFieldElement,
     C: SmallFieldContainer<CONTAINER_SIZE, F>,
@@ -405,17 +409,17 @@ fn gen<
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::{collections::HashMap, time::Instant};
 
     use dmpf::{
-        batch_code::BatchCodeDmpf, okvs::OkvsDmpf, DpfDmpf, EpsilonPercent, PrimeField64,
-        PrimeField64x2,
+        batch_code::BatchCodeDmpf, field::FieldElement, okvs::OkvsDmpf, DpfDmpf, EpsilonPercent,
+        PrimeField64, PrimeField64x2,
     };
     use rand::thread_rng;
 
     use crate::{
         gen, gen_regular,
-        polynomial::{from_share, share_polynomial, SparsePolynomial},
+        polynomial::{from_share, from_share_regular_error, share_polynomial, SparsePolynomial},
         ring::{ModuloPolynomial, PolynomialRingElement, TwoPowerDegreeCyclotomicPolynomial},
     };
 
@@ -448,11 +452,11 @@ mod tests {
     }
     #[test]
     fn test_ole_pcg() {
-        const LOG_POLYNOMIAL_DEGREE: usize = 15;
+        const LOG_POLYNOMIAL_DEGREE: usize = 6;
         const COMPRESSION_FACTOR: usize = 2;
-        const WEIGHT: usize = 70;
-        let dmpf = OkvsDmpf::<200, _>::new(EpsilonPercent::Ten);
-        // let dmpf = DpfDmpf::new();
+        const WEIGHT: usize = 5;
+        // let dmpf = OkvsDmpf::<200, _>::new(EpsilonPercent::Ten);
+        let dmpf = DpfDmpf::new();
         // let dmpf = BatchCodeDmpf::new(4, 50);
         let modulo_polynomial =
             TwoPowerDegreeCyclotomicPolynomial::<PrimeField64>::new(LOG_POLYNOMIAL_DEGREE);
@@ -479,9 +483,9 @@ mod tests {
     }
     #[test]
     fn test_ole_pcg_regular() {
-        const LOG_POLYNOMIAL_DEGREE: usize = 20;
+        const LOG_POLYNOMIAL_DEGREE: usize = 10;
         const COMPRESSION_FACTOR: usize = 2;
-        const WEIGHT: usize = 70;
+        const WEIGHT: usize = 17;
         // let dmpf = OkvsDmpf::<200, _>::new(EpsilonPercent::Ten);
         let dmpf = DpfDmpf::new();
         // let dmpf = BatchCodeDmpf::new(4, 50);
@@ -496,6 +500,7 @@ mod tests {
             &dmpf,
         );
         println!("OLE PCG took: {}", time.elapsed().as_millis());
+
         let time = Instant::now();
         let first_shares = first.expand();
         println!("Expand took: {}", time.elapsed().as_millis());
@@ -503,9 +508,8 @@ mod tests {
         let second_shares = second.expand();
         println!("Expand took: {}", time.elapsed().as_millis());
 
-        assert_eq!(
-            &first_shares.0 * &second_shares.0,
-            &first_shares.1 + &second_shares.1
-        );
+        let mul = &first_shares.0 * &second_shares.0;
+        let add = &first_shares.1 + &second_shares.1;
+        assert_eq!(mul, add);
     }
 }

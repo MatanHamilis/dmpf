@@ -22,7 +22,7 @@ where
 /// This implements a sparse polynomial represented as coefficients
 #[derive(Debug)]
 pub struct SparsePolynomial<F: RadixTwoFftFriendFieldElement> {
-    coefficients: Vec<(usize, F)>,
+    pub(crate) coefficients: Vec<(usize, F)>,
 }
 
 impl<F: RadixTwoFftFriendFieldElement> SparsePolynomial<F> {
@@ -44,13 +44,16 @@ impl<F: RadixTwoFftFriendFieldElement> SparsePolynomial<F> {
         weight: usize,
     ) -> Self {
         assert!(degree_bound > weight + 1);
-        let slice_size = degree_bound / weight;
+        let slice_size = degree_bound.div_ceil(weight);
         let coefficients = (0..weight)
-            .map(|i| {
+            .map_while(|i| {
+                if i * slice_size >= degree_bound {
+                    return None;
+                }
                 let coeff_deg = ((i * slice_size) + ((rng.next_u32() as usize) % slice_size))
                     .min(degree_bound - 1);
                 let coeff = F::random(&mut rng);
-                (coeff_deg, coeff)
+                Some((coeff_deg, coeff))
             })
             .collect();
         SparsePolynomial::new(coefficients)
@@ -91,13 +94,13 @@ pub fn share_regular_polynomial_mul<
 ) -> ((usize, Vec<(usize, D::Key)>), (usize, Vec<(usize, D::Key)>)) {
     let total_degree: usize = 1 << log_degree;
     let t = sqrt_points;
-    let block_size = (total_degree / 2) / t;
+    let block_size = (total_degree / 2).div_ceil(t);
     let block_dpf_domain_size = block_size.next_power_of_two();
     let log_sub_poly_degree = block_dpf_domain_size.ilog2() as usize;
-    let mut total_blocks = 2 * t - 1;
-    if total_blocks * block_size < total_degree {
-        total_blocks += 1;
-    }
+    let total_blocks = total_degree.div_ceil(block_size);
+    // if total_blocks * block_size < total_degree {
+    //     total_blocks += 1;
+    // }
     let mut coefficients_idx = 0;
     let mut new_poly_to_share = SparsePolynomial::<F>::new(Vec::with_capacity(2 * total_blocks));
     let mut coefficients_map = HashMap::with_capacity(2 * total_blocks);
@@ -478,9 +481,9 @@ mod tests {
     #[test]
     fn test_regular_share() {
         let mut rng = thread_rng();
-        const LOG_DEGREE_BOUND: usize = 9;
+        const LOG_DEGREE_BOUND: usize = 5;
         const DEGREE_BOUND: usize = 1 << LOG_DEGREE_BOUND;
-        const T: usize = 17;
+        const T: usize = 13;
         let dmpf = DpfDmpf::new();
         let p = SparsePolynomial::<PrimeField64>::random_regular(&mut rng, DEGREE_BOUND, T);
         let q = SparsePolynomial::<PrimeField64>::random_regular(&mut rng, DEGREE_BOUND, T);

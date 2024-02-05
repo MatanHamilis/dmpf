@@ -10,3 +10,10 @@ rand = {workspace = true}
 dmpf = {workspace = true}
 aes-prng = {workspace = true}
 # rb-okvs = {workspace = true}
+
+[[bench]]
+name = "ole_pcg"
+harness = false
+
+[dev-dependencies]
+criterion = "0.5.1"

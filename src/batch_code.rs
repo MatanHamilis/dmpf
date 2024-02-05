@@ -9,16 +9,19 @@ use rand::{CryptoRng, RngCore, SeedableRng};
 use crate::{utils::Node, Dmpf, DmpfKey, DpfKey, DpfOutput, EmptySession};
 
 pub struct BatchCodeDmpf<Output: DpfOutput> {
-    hash_functions_count: usize,
-    expansion_overhead_in_percent: usize,
+    // hash_functions_count: usize,
+    // expansion_overhead_in_percent: usize,
     _phantom: PhantomData<Output>,
 }
 
+const HASH_FUNCTIONS_COUNT: usize = 3;
+
 impl<Output: DpfOutput> BatchCodeDmpf<Output> {
-    pub fn new(hash_functions_count: usize, expansion_overhead_in_percent: usize) -> Self {
+    // pub fn new(hash_functions_count: usize, expansion_overhead_in_percent: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            hash_functions_count,
-            expansion_overhead_in_percent,
+            // hash_functions_count,
+            // expansion_overhead_in_percent,
             _phantom: PhantomData,
         }
     }
@@ -31,6 +34,13 @@ pub struct BatchCodeDmpfKey<Output: DpfOutput> {
     hash_functions: HashFunctionIndex,
     point_count: usize,
 }
+fn expansion_param_from_points(points: usize) -> usize {
+    if points < 5 {
+        100
+    } else {
+        40
+    }
+}
 
 impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
     type Key = BatchCodeDmpfKey<Output>;
@@ -40,8 +50,9 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
         inputs: &[(u128, Output)],
         mut rng: &mut R,
     ) -> Option<(Self::Key, Self::Key)> {
-        let buckets = (inputs.len() * (100 + self.expansion_overhead_in_percent)) / 100;
-        let bucket_size = ((1 << input_length) * self.hash_functions_count).div_ceil(buckets);
+        let expansion_overhead_in_percent = expansion_param_from_points(inputs.len());
+        let buckets = (inputs.len() * (100 + expansion_overhead_in_percent)) / 100;
+        let bucket_size = ((1 << input_length) * HASH_FUNCTIONS_COUNT).div_ceil(buckets);
         let dpf_input_length = usize::ilog2(2 * bucket_size - 1) as usize;
         let index_to_value_map: HashMap<_, _> = inputs
             .iter()
@@ -59,7 +70,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
             input_length,
             &indices[..],
             buckets,
-            self.hash_functions_count,
+            HASH_FUNCTIONS_COUNT,
             hash_functions_seed,
             &mut rng,
         );
@@ -82,7 +93,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
         let (_, hash_functions) = gen_hash_functions::<AesRng>(
             input_length,
             bucket_size,
-            self.hash_functions_count,
+            HASH_FUNCTIONS_COUNT,
             hash_functions_seed,
         );
         Some((
@@ -331,11 +342,11 @@ mod test {
 
     #[test]
     fn test_batch_code_dmpf() {
-        const W: usize = 4;
-        const POINTS: usize = 10;
-        const INPUT_SIZE: usize = 4;
-        const EXPANSION_OVERHEAD_IN_PERCENT: usize = 50;
-        let scheme = BatchCodeDmpf::new(W, EXPANSION_OVERHEAD_IN_PERCENT);
+        const W: usize = 3;
+        const POINTS: usize = 25;
+        const INPUT_SIZE: usize = 10;
+        const EXPANSION_OVERHEAD_IN_PERCENT: usize = 30;
+        let scheme = BatchCodeDmpf::new();
         let mut rng = thread_rng();
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
             (
