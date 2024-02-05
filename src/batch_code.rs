@@ -1,12 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Debug,
     marker::PhantomData,
 };
 
 use aes_prng::AesRng;
 use rand::{CryptoRng, RngCore, SeedableRng};
 
-use crate::{utils::Node, Dmpf, DmpfKey, DpfKey, DpfOutput, EmptySession};
+use crate::{utils::Node, Dmpf, DmpfKey, DmpfSession, DpfKey, DpfOutput};
 
 pub struct BatchCodeDmpf<Output: DpfOutput> {
     // hash_functions_count: usize,
@@ -31,7 +32,7 @@ pub struct BatchCodeDmpfKey<Output: DpfOutput> {
     input_domain_log_size: usize,
     dpf_input_length: usize,
     buckets: Vec<DpfKey<Output>>,
-    hash_functions: HashFunctionIndex,
+    hash_functions_seed: aes_prng::RngSeed,
     point_count: usize,
 }
 fn expansion_param_from_points(points: usize) -> usize {
@@ -65,9 +66,9 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
             .collect();
         let indices: Vec<_> = index_to_value_map.keys().copied().collect();
         let mut hash_functions_seed = [0u8; aes_prng::SEED_SIZE];
-        rng.fill_bytes(&mut hash_functions_seed);
         let mut encoding = None;
         while encoding.is_none() {
+            rng.fill_bytes(&mut hash_functions_seed);
             encoding = batch_encode::<AesRng>(
                 input_length,
                 &indices[..],
@@ -94,40 +95,41 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
             dpfs[bucket] = DpfKey::gen(&roots, &alpha, dpf_input_length, &beta);
         }
         let (dpfs_0, dpfs_1): (Vec<_>, Vec<_>) = dpfs.into_iter().unzip();
-        let (_, hash_functions) = gen_hash_functions::<AesRng>(
-            input_length,
-            bucket_size,
-            HASH_FUNCTIONS_COUNT,
-            hash_functions_seed,
-        );
         Some((
             BatchCodeDmpfKey {
                 input_domain_log_size: input_length,
                 dpf_input_length,
                 buckets: dpfs_0,
-                hash_functions: hash_functions.clone(),
+                hash_functions_seed,
                 point_count: inputs.len(),
             },
             BatchCodeDmpfKey {
                 input_domain_log_size: input_length,
                 dpf_input_length,
                 buckets: dpfs_1,
-                hash_functions,
+                hash_functions_seed,
                 point_count: inputs.len(),
             },
         ))
     }
 }
 
+pub struct BatchCodeDmpfSession {
+    mapping: Option<HashFunctionIndex>,
+}
 impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
-    type Session = EmptySession;
+    type Session = BatchCodeDmpfSession;
     fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
+        if session.mapping.is_none() {
+            session.init(self);
+        }
         // Zero output buffer.
         *output = Output::default();
         let input_usize = (input >> (128 - self.input_domain_log_size)) as usize;
 
-        for f in self.hash_functions.iter() {
-            let (bucket, index) = self.hash_functions.eval(input_usize, f);
+        let hash_functions = session.mapping.as_ref().unwrap();
+        for f in hash_functions.iter() {
+            let (bucket, index) = hash_functions.eval(input_usize, f);
             let dpf_input = (index as u128) << (128 - self.dpf_input_length);
             let mut cur_output = Output::default();
             self.buckets[bucket].eval(&dpf_input, &mut cur_output);
@@ -138,18 +140,40 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
         self.point_count
     }
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
+        if session.mapping.is_none() {
+            session.init(self);
+        }
         let dpfs_eval_all: Vec<_> = self.buckets.iter().map(|dpf| dpf.eval_all()).collect();
         let input_domain_size = 1 << self.input_domain_log_size;
         let mut output = Vec::with_capacity(input_domain_size);
         for i in 0..input_domain_size {
             let mut output_cur = Output::default();
-            for (bucket, bucket_idx) in self.hash_functions.eval_all(i) {
+            for (bucket, bucket_idx) in session.mapping.as_ref().unwrap().eval_all(i) {
                 let c = dpfs_eval_all[bucket][bucket_idx];
                 output_cur += c;
             }
             output.push(output_cur);
         }
         output.into()
+    }
+}
+impl DmpfSession for BatchCodeDmpfSession {
+    fn get_session(kvs_count: usize) -> Self {
+        BatchCodeDmpfSession { mapping: None }
+    }
+}
+impl BatchCodeDmpfSession {
+    fn init<W: DpfOutput>(&mut self, instance: &BatchCodeDmpfKey<W>) {
+        let input_domain_size = 1 << instance.input_domain_log_size;
+        let bucket_size =
+            (input_domain_size * HASH_FUNCTIONS_COUNT).div_ceil(instance.buckets.len());
+        let (_, hash_functions) = gen_hash_functions::<AesRng>(
+            instance.input_domain_log_size,
+            bucket_size,
+            HASH_FUNCTIONS_COUNT,
+            instance.hash_functions_seed,
+        );
+        self.mapping = Some(hash_functions)
     }
 }
 
@@ -198,7 +222,10 @@ fn gen_hash_functions<R: RngCore + CryptoRng + SeedableRng>(
     bucket_size: usize,
     hash_functions_count: usize,
     seed: R::Seed,
-) -> (Vec<usize>, HashFunctionIndex) {
+) -> (Vec<usize>, HashFunctionIndex)
+where
+    R::Seed: Debug,
+{
     let mut rng = R::from_seed(seed);
     let total_domain_size = hash_functions_count << input_domain_log_size;
     let mut permutation: Vec<_> = (0..(1 << input_domain_log_size))
@@ -225,7 +252,7 @@ fn batch_encode<R: CryptoRng + RngCore + SeedableRng>(
     mut rng: impl CryptoRng + RngCore,
 ) -> Option<Vec<(usize, (usize, usize))>>
 where
-    R::Seed: Clone + Copy,
+    R::Seed: Clone + Copy + Debug,
 {
     let input_domain_size = 1 << input_domain_log_size;
     let bucket_size = (input_domain_size * hash_functions_count).div_ceil(buckets);
@@ -349,10 +376,8 @@ mod test {
 
     #[test]
     fn test_batch_code_dmpf() {
-        const W: usize = 3;
         const POINTS: usize = 25;
         const INPUT_SIZE: usize = 10;
-        const EXPANSION_OVERHEAD_IN_PERCENT: usize = 30;
         let scheme = BatchCodeDmpf::new();
         let mut rng = thread_rng();
         let inputs: [_; POINTS] = core::array::from_fn(|i| {
@@ -363,14 +388,16 @@ mod test {
         });
         let input_map: HashMap<_, _> = inputs.iter().copied().collect();
         let (key_1, key_2) = scheme.try_gen(INPUT_SIZE, &inputs[..], &mut rng).unwrap();
-        let eval_all_1 = key_1.eval_all();
-        let eval_all_2 = key_2.eval_all();
+        let mut session = key_1.make_session();
+        session.init(&key_1);
+        let eval_all_1 = key_1.eval_all_with_session(&mut session);
+        let eval_all_2 = key_2.eval_all_with_session(&mut session);
         for i in 0..(1 << INPUT_SIZE) {
             let mut output_1 = PrimeField64x2::default();
             let mut output_2 = PrimeField64x2::default();
             let encoded_i = encode_input(i, INPUT_SIZE);
-            key_1.eval(&encoded_i, &mut output_1);
-            key_2.eval(&encoded_i, &mut output_2);
+            key_1.eval_with_session(&encoded_i, &mut output_1, &mut session);
+            key_2.eval_with_session(&encoded_i, &mut output_2, &mut session);
             assert_eq!(output_1, eval_all_1[i]);
             assert_eq!(output_2, eval_all_2[i]);
             let output = output_1 + output_2;
