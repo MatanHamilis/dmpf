@@ -66,14 +66,18 @@ impl<Output: DpfOutput> Dmpf<Output> for BatchCodeDmpf<Output> {
         let indices: Vec<_> = index_to_value_map.keys().copied().collect();
         let mut hash_functions_seed = [0u8; aes_prng::SEED_SIZE];
         rng.fill_bytes(&mut hash_functions_seed);
-        let encoding = batch_encode::<AesRng>(
-            input_length,
-            &indices[..],
-            buckets,
-            HASH_FUNCTIONS_COUNT,
-            hash_functions_seed,
-            &mut rng,
-        );
+        let mut encoding = None;
+        while encoding.is_none() {
+            encoding = batch_encode::<AesRng>(
+                input_length,
+                &indices[..],
+                buckets,
+                HASH_FUNCTIONS_COUNT,
+                hash_functions_seed,
+                &mut rng,
+            );
+        }
+        let encoding = encoding.unwrap();
         let mut dpfs: Vec<_> = (0..buckets)
             .map(|_| {
                 let roots = (Node::random(&mut rng), Node::random(&mut rng));
@@ -219,63 +223,63 @@ fn batch_encode<R: CryptoRng + RngCore + SeedableRng>(
     hash_functions_count: usize,
     seed: R::Seed,
     mut rng: impl CryptoRng + RngCore,
-) -> Vec<(usize, (usize, usize))>
+) -> Option<Vec<(usize, (usize, usize))>>
 where
     R::Seed: Clone + Copy,
 {
     let input_domain_size = 1 << input_domain_log_size;
-    'outer: loop {
-        let bucket_size = (input_domain_size * hash_functions_count).div_ceil(buckets);
-        let (_, hash_functions) = gen_hash_functions::<R>(
-            input_domain_log_size,
-            bucket_size,
-            hash_functions_count,
-            seed,
-        );
-        let mut item_to_bucket = vec![None; indices.len()];
-        let mut bucket_to_item = vec![None; buckets];
-        let mut bucket_randomness = rng.next_u64() as usize;
-        let mut indices_left = HashSet::<_>::from_iter(0..indices.len());
-        let mut index_to_map = (rng.next_u64() as usize) % indices.len();
-        assert!(indices_left.remove(&index_to_map));
-        let mut iterations_without_advance = 0;
-        for _ in 0..(indices.len() * indices.len() * indices.len()) {
-            let item_to_map = indices[index_to_map];
-            // Sample random function
-            let function_id = bucket_randomness % hash_functions_count;
-            bucket_randomness /= hash_functions_count;
-            if bucket_randomness < hash_functions_count {
-                bucket_randomness = rng.next_u64() as usize;
-            }
-
-            let (bucket, index_in_bucket) = hash_functions.eval(item_to_map, function_id);
-
-            index_to_map = if let Some(v) = bucket_to_item[bucket].replace(index_to_map) {
-                item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));
-                item_to_bucket[v] = None;
-                iterations_without_advance += 1;
-                if iterations_without_advance <= indices.len() * hash_functions_count {
-                    v
-                } else {
-                    continue 'outer;
-                }
-            } else {
-                item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));
-                iterations_without_advance = 0;
-                let v = match indices_left.iter().next() {
-                    None => break,
-                    Some(v) => *v,
-                };
-                indices_left.remove(&v);
-                v
-            }
+    let bucket_size = (input_domain_size * hash_functions_count).div_ceil(buckets);
+    let (_, hash_functions) = gen_hash_functions::<R>(
+        input_domain_log_size,
+        bucket_size,
+        hash_functions_count,
+        seed,
+    );
+    let mut item_to_bucket = vec![None; indices.len()];
+    let mut bucket_to_item = vec![None; buckets];
+    let mut bucket_randomness = rng.next_u64() as usize;
+    let mut indices_left = HashSet::<_>::from_iter(0..indices.len());
+    let mut index_to_map = (rng.next_u64() as usize) % indices.len();
+    assert!(indices_left.remove(&index_to_map));
+    let mut iterations_without_advance = 0;
+    for _ in 0..(indices.len() * indices.len() * indices.len()) {
+        let item_to_map = indices[index_to_map];
+        // Sample random function
+        let function_id = bucket_randomness % hash_functions_count;
+        bucket_randomness /= hash_functions_count;
+        if bucket_randomness < hash_functions_count {
+            bucket_randomness = rng.next_u64() as usize;
         }
-        return item_to_bucket
+
+        let (bucket, index_in_bucket) = hash_functions.eval(item_to_map, function_id);
+
+        index_to_map = if let Some(v) = bucket_to_item[bucket].replace(index_to_map) {
+            item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));
+            item_to_bucket[v] = None;
+            iterations_without_advance += 1;
+            if iterations_without_advance <= indices.len() * hash_functions_count {
+                v
+            } else {
+                return None;
+            }
+        } else {
+            item_to_bucket[index_to_map] = Some((bucket, index_in_bucket));
+            iterations_without_advance = 0;
+            let v = match indices_left.iter().next() {
+                None => break,
+                Some(v) => *v,
+            };
+            indices_left.remove(&v);
+            v
+        }
+    }
+    Some(
+        item_to_bucket
             .into_iter()
             .enumerate()
             .map(|(idx, v)| (indices[idx], v.unwrap()))
-            .collect();
-    }
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -313,6 +317,7 @@ mod test {
             thread_rng(),
         );
 
+        let encoding = encoding.unwrap();
         // Ensure we receive a mapping for each input.
         assert_eq!(encoding.len(), indices.len());
 
