@@ -129,20 +129,10 @@ pub struct BinaryEncodedOkvs<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
 );
 impl<const W: usize, K: OkvsKey, V: BinaryOkvsValue> BinaryEncodedOkvs<W, K, V> {
     pub fn decode(&self, key: &K) -> V {
-        let (offset, bits) = hash_key::<W, K>(&key, self.0.len());
-        let slice = &self.0[offset..offset + (W * u64::BITS as usize)];
-        bits.iter()
-            .copied()
-            .zip(slice.chunks(u64::BITS as usize))
-            .map(|(mut bits, chunk)| {
-                let mut sum: V = V::default();
-                for idx in 0..chunk.len() {
-                    let bit = (bits & 1) == 1;
-                    bits = bits.overflowing_shr(1).0;
-                    sum ^= chunk[idx] * bit;
-                }
-                sum
-            })
+        let (offset, bits) = hash_key_compressed::<W, K>(key, self.0.len());
+        let slice = &self.0[offset..offset + (W * 64 as usize)];
+        bits.zip(slice)
+            .map(|(bit, v)| *v * bit)
             .fold(V::default(), |cur, acc| cur ^ acc)
     }
 }
