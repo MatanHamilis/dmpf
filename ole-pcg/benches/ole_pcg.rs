@@ -6,7 +6,7 @@ use dmpf::{
     PrimeField64, PrimeField64x2, RadixTwoFftFriendFieldElement, SmallFieldContainer,
 };
 use ole_pcg::{
-    gen_regular,
+    gen, gen_regular,
     ring::{ModuloPolynomial, TwoPowerDegreeCyclotomicPolynomial},
     OlePcgSeed,
 };
@@ -27,7 +27,7 @@ fn bench_ole_pcg_regular_single<
 ) {
     c.bench_with_input(
         BenchmarkId::new(
-            "gen_regular",
+            "gen/regular",
             format!(
                 "dmpf:{}/c:{}/t:{}/logN:{}",
                 dmpf_title, compression_factor, weight, log_degree
@@ -42,7 +42,7 @@ fn bench_ole_pcg_regular_single<
     let (k_0, k_1) = gen_regular(log_degree, compression_factor, modulo, weight, d);
     c.bench_with_input(
         BenchmarkId::new(
-            "expand",
+            "expand/regular",
             format!(
                 "dmpf:{}/c:{}/t:{}/logN:{}",
                 dmpf_title, compression_factor, weight, log_degree
@@ -55,7 +55,51 @@ fn bench_ole_pcg_regular_single<
         },
     );
 }
-fn bench_ole_pcg_regular_with_dmpf<
+fn bench_ole_pcg_nonregular_single<
+    const W: usize,
+    C: SmallFieldContainer<W, F>,
+    D: Dmpf<C>,
+    F: RadixTwoFftFriendFieldElement,
+>(
+    c: &mut Criterion,
+    d: &D,
+    dmpf_title: &str,
+    log_degree: usize,
+    compression_factor: usize,
+    weight: usize,
+    modulo: impl ModuloPolynomial<F>,
+) {
+    c.bench_with_input(
+        BenchmarkId::new(
+            "gen/nonregular",
+            format!(
+                "dmpf:{}/c:{}/t:{}/logN:{}",
+                dmpf_title, compression_factor, weight, log_degree
+            ),
+        ),
+        &(log_degree, compression_factor, weight, d),
+        |b, input| {
+            let (log_degree, compression_factor, weight, d) = *input;
+            b.iter(|| gen(log_degree, compression_factor, modulo.clone(), weight, d))
+        },
+    );
+    let (k_0, k_1) = gen_regular(log_degree, compression_factor, modulo, weight, d);
+    c.bench_with_input(
+        BenchmarkId::new(
+            "expand/nonregular",
+            format!(
+                "dmpf:{}/c:{}/t:{}/logN:{}",
+                dmpf_title, compression_factor, weight, log_degree
+            ),
+        ),
+        &(log_degree, compression_factor, weight, d),
+        |b, input| {
+            let (log_degree, compression_factor, weight, d) = *input;
+            b.iter(|| k_0.expand())
+        },
+    );
+}
+fn bench_ole_pcg_with_dmpf<
     const W: usize,
     F: RadixTwoFftFriendFieldElement,
     C: SmallFieldContainer<W, F>,
@@ -78,19 +122,31 @@ fn bench_ole_pcg_regular_with_dmpf<
             compression_factor,
             weight,
             modulo.clone(),
-        )
+        );
+        bench_ole_pcg_nonregular_single(
+            c,
+            d,
+            dmpf_title,
+            LOG_DEG,
+            compression_factor,
+            weight,
+            modulo.clone(),
+        );
     }
 }
-fn bench_ole_pcg_regular(c: &mut Criterion) {
+fn bench_ole_pcg(c: &mut Criterion) {
     let dpf = DpfDmpf::new();
-    bench_ole_pcg_regular_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Dpf", c);
+    bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Dpf", c);
     let dpf = OkvsDmpf::<200, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
-    bench_ole_pcg_regular_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Okvs", c);
+    bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Okvs", c);
     let dpf = BigStateDmpf::new();
-    bench_ole_pcg_regular_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BigState", c);
+    bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BigState", c);
     let dpf = BatchCodeDmpf::new();
-    bench_ole_pcg_regular_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BatchCode", c);
+    bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BatchCode", c);
 }
 
-criterion_group!(benches, bench_ole_pcg_regular);
+criterion_group!(
+    name = benches;
+    config = Criterion::default().sample_size(10);
+    targets = bench_ole_pcg);
 criterion_main!(benches);

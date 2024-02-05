@@ -196,7 +196,7 @@ fn bench_dpf_single(c: &mut Criterion) {
 
 fn bench_big_state_dmpf(c: &mut Criterion) {
     let dpf = BigStateDmpf::new();
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1.min(15) {
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1.min(17) {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "big_state", &dpf, input_len, points);
         }
@@ -204,8 +204,9 @@ fn bench_big_state_dmpf(c: &mut Criterion) {
 }
 
 criterion_group!(
-    benches,
-    bench_dpf_single,
+    name = benches;
+    config = Criterion::default().sample_size(10);
+    targets = bench_dpf_single,
     // bench_dpf_dmpf
     bench_big_state_dmpf,
     bench_batch_code_dmpf,

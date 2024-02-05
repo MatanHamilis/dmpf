@@ -78,7 +78,6 @@ impl<
             .zip(self.sparse_polynomials.iter())
             .map(|(p, s)| s * p)
             .sum();
-        println!("Multiplicative share gen: {}", time.elapsed().as_millis());
 
         // Second, compute additive shares:
         let tensor_product_dense = match self.role {
@@ -98,7 +97,6 @@ impl<
                 p * &dense_ring_element
             })
             .sum();
-        println!("Additive share gen: {}", time.elapsed().as_millis());
         (multiplicative_share_poly, additive_share_poly)
     }
 }
@@ -161,7 +159,6 @@ impl<
             .zip(self.sparse_polynomials.iter())
             .map(|(p, s)| s * p)
             .sum();
-        println!("Multiplicative share gen: {}", time.elapsed().as_millis());
 
         // Second, compute additive shares:
         let tensor_product_dense = match self.role {
@@ -188,7 +185,6 @@ impl<
                 p * &dense_ring_element
             })
             .sum();
-        println!("Additive share gen: {}", time.elapsed().as_millis());
         (multiplicative_share_poly, additive_share_poly)
     }
 }
@@ -409,17 +405,14 @@ pub fn gen<
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, time::Instant};
+    use std::time::Instant;
 
-    use dmpf::{
-        batch_code::BatchCodeDmpf, field::FieldElement, okvs::OkvsDmpf, DpfDmpf, EpsilonPercent,
-        PrimeField64, PrimeField64x2,
-    };
+    use dmpf::{okvs::OkvsDmpf, DpfDmpf, EpsilonPercent, PrimeField64, PrimeField64x2};
     use rand::thread_rng;
 
     use crate::{
         gen, gen_regular,
-        polynomial::{from_share, from_share_regular_error, share_polynomial, SparsePolynomial},
+        polynomial::{from_share, share_polynomial, SparsePolynomial},
         ring::{ModuloPolynomial, PolynomialRingElement, TwoPowerDegreeCyclotomicPolynomial},
     };
 
