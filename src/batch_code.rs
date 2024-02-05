@@ -36,7 +36,7 @@ pub struct BatchCodeDmpfKey<Output: DpfOutput> {
 }
 fn expansion_param_from_points(points: usize) -> usize {
     if points < 30 {
-        80
+        100
     } else {
         40
     }
