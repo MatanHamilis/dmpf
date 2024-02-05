@@ -147,6 +147,6 @@ fn bench_ole_pcg(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(10);
+    config = Criterion::default().sample_size(10).configure_from_args();
     targets = bench_ole_pcg);
 criterion_main!(benches);

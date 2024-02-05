@@ -205,7 +205,7 @@ fn bench_big_state_dmpf(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(10);
+    config = Criterion::default().sample_size(10).configure_from_args();
     targets = bench_dpf_single,
     // bench_dpf_dmpf
     bench_big_state_dmpf,
