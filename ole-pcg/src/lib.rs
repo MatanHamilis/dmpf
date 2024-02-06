@@ -142,6 +142,7 @@ impl<
     }
     pub fn expand(&self) -> (PolynomialRingElement<F, M>, PolynomialRingElement<F, M>) {
         // First, compute the multiplicative shares:
+        let time = Instant::now();
         let my_polynomials = polynomials_from_seed(
             self.my_vec_seed,
             self.sparse_polynomials[0].modulo().clone(),
@@ -152,6 +153,7 @@ impl<
             self.sparse_polynomials[0].modulo().clone(),
             self.compression_factor,
         );
+        println!("First part: {}", time.elapsed().as_millis());
         let time = Instant::now();
         assert_eq!(my_polynomials.len(), self.sparse_polynomials.len());
         let multiplicative_share_poly: PolynomialRingElement<F, M> = my_polynomials
@@ -165,6 +167,7 @@ impl<
             Role::First => tensor_product(&my_polynomials, &peer_polynomials),
             Role::Second => tensor_product(&peer_polynomials, &my_polynomials),
         };
+        println!("Second part: {}", time.elapsed().as_millis());
         let time = Instant::now();
         assert_eq!(
             self.tensor_product_fss.len(),
@@ -175,16 +178,22 @@ impl<
             .iter()
             .zip(tensor_product_dense.v.iter())
             .map(|((k_0, k_1), p)| {
+                let time = Instant::now();
                 let dense_poly = from_share_regular_error::<CONTAINER_SIZE, F, C, D>(
                     (*k_0, &k_1[..]),
                     self.sparse_polynomials[0].modulo().deg() * 2,
                 );
+                println!("Polynomial restore: {}", time.elapsed().as_millis());
+                let time = Instant::now();
                 let dense_poly = p.get_modulo().modulo(dense_poly);
                 let dense_ring_element =
                     PolynomialRingElement::new(dense_poly, p.get_modulo().clone());
-                p * &dense_ring_element
+                let o = p * &dense_ring_element;
+                println!("mod + Polynomial mul: {}", time.elapsed().as_millis());
+                o
             })
             .sum();
+        println!("Third part: {}", time.elapsed().as_millis());
         (multiplicative_share_poly, additive_share_poly)
     }
 }
