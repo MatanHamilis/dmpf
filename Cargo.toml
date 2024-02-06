@@ -38,6 +38,10 @@ criterion = "0.5.1"
 name = "dpf"
 harness = false
 
+[[bench]]
+name = "batch_code"
+harness = false
+
 
 
 [build]

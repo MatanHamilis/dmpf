@@ -35,7 +35,7 @@ pub struct BatchCodeDmpfKey<Output: DpfOutput> {
     hash_functions_seed: aes_prng::RngSeed,
     point_count: usize,
 }
-fn expansion_param_from_points(points: usize) -> usize {
+pub fn expansion_param_from_points(points: usize) -> usize {
     if points < 30 {
         100
     } else {
@@ -178,13 +178,17 @@ impl BatchCodeDmpfSession {
 }
 
 #[derive(Clone)]
-struct HashFunctionIndex {
+pub struct HashFunctionIndex {
     contents: Vec<usize>,
     hash_functions_count: usize,
     bucket_size: usize,
 }
 impl HashFunctionIndex {
-    fn new(hash_functions_count: usize, input_domain_log_size: usize, bucket_size: usize) -> Self {
+    pub fn new(
+        hash_functions_count: usize,
+        input_domain_log_size: usize,
+        bucket_size: usize,
+    ) -> Self {
         Self {
             contents: vec![usize::MAX; hash_functions_count << input_domain_log_size],
             hash_functions_count,
@@ -217,7 +221,7 @@ impl HashFunctionIndex {
     }
 }
 
-fn gen_hash_functions<R: RngCore + CryptoRng + SeedableRng>(
+pub fn gen_hash_functions<R: RngCore + CryptoRng + SeedableRng>(
     input_domain_log_size: usize,
     bucket_size: usize,
     hash_functions_count: usize,
