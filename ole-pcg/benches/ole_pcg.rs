@@ -39,7 +39,6 @@ fn bench_ole_pcg_regular_single<
             b.iter(|| gen_regular(log_degree, compression_factor, modulo.clone(), weight, d))
         },
     );
-    let (k_0, k_1) = gen_regular(log_degree, compression_factor, modulo, weight, d);
     c.bench_with_input(
         BenchmarkId::new(
             "expand/regular",
@@ -50,6 +49,7 @@ fn bench_ole_pcg_regular_single<
         ),
         &(log_degree, compression_factor, weight, d),
         |b, input| {
+            let (k_0, _) = gen_regular(log_degree, compression_factor, modulo.clone(), weight, d);
             let (log_degree, compression_factor, weight, d) = *input;
             b.iter(|| k_0.expand())
         },
@@ -83,7 +83,6 @@ fn bench_ole_pcg_nonregular_single<
             b.iter(|| gen(log_degree, compression_factor, modulo.clone(), weight, d))
         },
     );
-    let (k_0, k_1) = gen(log_degree, compression_factor, modulo, weight, d);
     c.bench_with_input(
         BenchmarkId::new(
             "expand/nonregular",
@@ -94,6 +93,7 @@ fn bench_ole_pcg_nonregular_single<
         ),
         &(log_degree, compression_factor, weight, d),
         |b, input| {
+            let (k_0, _) = gen(log_degree, compression_factor, modulo.clone(), weight, d);
             let (log_degree, compression_factor, weight, d) = *input;
             b.iter(|| k_0.expand())
         },
