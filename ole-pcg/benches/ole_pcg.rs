@@ -8,7 +8,6 @@ use dmpf::{
 use ole_pcg::{
     gen, gen_regular,
     ring::{ModuloPolynomial, TwoPowerDegreeCyclotomicPolynomial},
-    OlePcgSeed,
 };
 
 fn bench_ole_pcg_regular_single<
@@ -110,7 +109,7 @@ fn bench_ole_pcg_with_dmpf<
     c: &mut Criterion,
 ) {
     const LOG_DEG: usize = 20;
-    const PARAMS: [(usize, usize); 3] = [(66, 2), (14, 4), (8, 5)];
+    const PARAMS: [(usize, usize); 3] = [(66, 2), (14, 4), (5, 8)];
 
     let modulo = TwoPowerDegreeCyclotomicPolynomial::<F>::new(LOG_DEG);
     for (weight, compression_factor) in PARAMS {

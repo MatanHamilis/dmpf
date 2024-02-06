@@ -478,9 +478,9 @@ mod tests {
     }
     #[test]
     fn test_ole_pcg_regular() {
-        const LOG_POLYNOMIAL_DEGREE: usize = 10;
+        const LOG_POLYNOMIAL_DEGREE: usize = 20;
         const COMPRESSION_FACTOR: usize = 2;
-        const WEIGHT: usize = 17;
+        const WEIGHT: usize = 66;
         // let dmpf = OkvsDmpf::<200, _>::new(EpsilonPercent::Ten);
         let dmpf = DpfDmpf::new();
         // let dmpf = BatchCodeDmpf::new(4, 50);
