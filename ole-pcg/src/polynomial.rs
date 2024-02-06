@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_poly_mul() {
         const TESTS: usize = 100;
-        const LOG_DEGREE: usize = 10;
+        const LOG_DEGREE: usize = 20;
         const DEGREE: usize = 1 << LOG_DEGREE;
         let mut rng = thread_rng();
         let p = DensePolynomial::from_iter((0..DEGREE).map(|_| PrimeField64::random(thread_rng())));

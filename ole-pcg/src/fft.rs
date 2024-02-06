@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use dmpf::field::{FieldElement, PowersIterator, RadixTwoFftFriendFieldElement};
 
 fn reverse_bit_orderings<T: Copy + Clone>(v: &[T]) -> Vec<T> {
@@ -26,6 +28,7 @@ pub fn fft<F: RadixTwoFftFriendFieldElement>(coefficients: &[F]) -> Vec<F> {
     internal_fft(coefficients, generator)
 }
 fn internal_fft<F: RadixTwoFftFriendFieldElement>(coefficients: &[F], mut generator: F) -> Vec<F> {
+    let time = Instant::now();
     let log_size: u32 = coefficients.len().ilog2();
     assert!(coefficients.len().is_power_of_two());
     let squares: Vec<_> = (0..log_size)
@@ -36,20 +39,45 @@ fn internal_fft<F: RadixTwoFftFriendFieldElement>(coefficients: &[F], mut genera
         })
         .collect();
     assert!(generator.is_one());
+    println!("FFT First: {}", time.elapsed().as_millis());
+    let time = Instant::now();
     let mut output: Vec<F> = reverse_bit_orderings(coefficients);
+    println!("FFT Second: {}", time.elapsed().as_millis());
+    let time = Instant::now();
     (1..=log_size)
         .zip(squares.iter().rev())
         .for_each(|(log_chk_sz, &g)| {
+            let time = Instant::now();
             let chk_sz = 1 << log_chk_sz;
+            let powers_time = Instant::now();
             let g_pow: Vec<_> = PowersIterator::new(g).take(chk_sz / 2).collect();
-            output.chunks_mut(chk_sz).for_each(|chk| {
-                let half_len = chk.len() / 2;
-                for i in 0..half_len {
-                    let mid = g_pow[i] * chk[i + half_len];
-                    (chk[i], chk[i + half_len]) = (chk[i] + mid, chk[i] - mid);
-                }
-            })
+            println!("FFT powers {}", powers_time.elapsed().as_millis());
+            let half_len = chk_sz / 2;
+            if half_len < 8 {
+                output.chunks_mut(chk_sz).for_each(|chk| {
+                    for i in 0..half_len {
+                        let mid = g_pow[i] * chk[i + half_len];
+                        (chk[i], chk[i + half_len]) = (chk[i] + mid, chk[i] - mid);
+                    }
+                });
+            } else {
+                output.chunks_mut(chk_sz).for_each(|chk| {
+                    for i in 0..half_len / 8 {
+                        let four_i = i << 3;
+                        let four_i_plus_half_len = half_len + four_i;
+                        let mid: [F; 8] = core::array::from_fn(|i| {
+                            g_pow[four_i + i] * chk[four_i_plus_half_len + i]
+                        });
+                        for i in 0..8 {
+                            (chk[four_i + i], chk[four_i_plus_half_len + i]) =
+                                (chk[four_i + i] + mid[i], chk[four_i + i] - mid[i]);
+                        }
+                    }
+                });
+            }
+            println!("FFT round {}: {}", log_chk_sz, time.elapsed().as_millis());
         });
+    println!("FFT third: {}", time.elapsed().as_millis());
     output
 }
 
