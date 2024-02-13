@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dmpf::{
     batch_code::BatchCodeDmpf, big_state::BigStateDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf,
-    DpfKey, DpfOutput, LogN, Node, PrimeField64x2,
+    DpfKey, DpfOutput, EpsilonPercent, LogN, Node, PrimeField64x2,
 };
 use rand::{thread_rng, RngCore};
 
@@ -130,20 +130,25 @@ fn match_logn(points: usize) -> Option<LogN> {
 }
 fn bench_okvs_dmpf(c: &mut Criterion) {
     const LAMBDA: usize = 40;
+    let eps = EpsilonPercent::Hundred;
     for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
         for points in POINTS {
-            let w = g(
-                LAMBDA,
-                dmpf::EpsilonPercent::Ten,
-                match_logn(points).unwrap(),
-            );
+            let w = g(LAMBDA, eps, match_logn(points).unwrap());
             match w {
+                16 => {
+                    let dpf = OkvsDmpf::<3, 16, PrimeField64x2>::new(eps);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
+                18 => {
+                    let dpf = OkvsDmpf::<3, 18, PrimeField64x2>::new(eps);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
                 168 => {
-                    let dpf = OkvsDmpf::<3, 168, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    let dpf = OkvsDmpf::<3, 168, PrimeField64x2>::new(eps);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 183 => {
-                    let dpf = OkvsDmpf::<3, 183, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+                    let dpf = OkvsDmpf::<3, 183, PrimeField64x2>::new(eps);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 _ => panic!("w missing: {}", w),

@@ -75,11 +75,51 @@ pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
     blocks[2][0] ^= children[2];
     unsafe { std::mem::transmute(blocks) }
 }
-pub fn many_prg(
-    input: &Node,
+pub fn many_many_prg(
+    input: &[Node],
     mut children: impl Iterator<Item = u16> + Clone,
     output: &mut [Node],
 ) {
+    let input_block =
+        unsafe { std::slice::from_raw_parts(input.as_ptr() as *const Block, input.len()) };
+    let nodes_per_input = output.len() / input.len();
+    if nodes_per_input > 256 {
+        unimplemented!()
+    }
+    assert_eq!(children.clone().count(), nodes_per_input);
+    assert_eq!(nodes_per_input * input.len(), output.len());
+    let mut blocks_output =
+        unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr() as *mut Block, output.len()) };
+    input_block
+        .iter()
+        .zip(blocks_output.chunks_exact_mut(nodes_per_input))
+        .for_each(|(i, os)| {
+            os.iter_mut().zip(children.clone()).for_each(|(n, c)| {
+                *n = *i;
+                let b = c.to_be_bytes();
+                n[0] ^= b[0];
+                n[1] ^= b[1];
+            });
+        });
+    AES.encrypt_blocks(&mut blocks_output);
+    blocks_output
+        .chunks_exact_mut(nodes_per_input)
+        .for_each(|os| {
+            os.iter_mut().zip(children.clone()).for_each(|(n, c)| {
+                let b = c.to_be_bytes();
+                n[0] ^= b[0];
+                n[1] ^= b[1];
+            });
+        });
+    output
+        .chunks_exact_mut(nodes_per_input)
+        .zip(input.iter())
+        .for_each(|(os, i)| {
+            os.iter_mut().for_each(|o| *o ^= *i);
+        })
+}
+
+pub fn many_prg(input: &Node, children: impl Iterator<Item = u16> + Clone, output: &mut [Node]) {
     let input_block = Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input));
     if output.len() > 256 {
         unimplemented!()
@@ -90,7 +130,7 @@ pub fn many_prg(
     blocks_output
         .iter_mut()
         .zip(children_copy)
-        .for_each(|(mut v, child)| {
+        .for_each(|(v, child)| {
             *v = input_block;
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
@@ -100,7 +140,7 @@ pub fn many_prg(
     blocks_output
         .iter_mut()
         .zip(children)
-        .for_each(|(mut v, child)| {
+        .for_each(|(v, child)| {
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
             v[1] ^= bytes[1];
@@ -114,7 +154,7 @@ mod tests {
 
     use crate::Node;
 
-    use super::{double_prg, double_prg_many, DOUBLE_PRG_CHILDREN};
+    use super::{double_prg, double_prg_many, many_many_prg, many_prg, DOUBLE_PRG_CHILDREN};
 
     #[test]
     fn test_double_prg() {
@@ -129,5 +169,16 @@ mod tests {
                 assert_eq!(d[1], bs[1]);
             })
         }
+    }
+    #[test]
+    fn test_many_many_prg() {
+        let mut rng = thread_rng();
+        let mut output = vec![Node::default(); 20];
+        let mut output_2 = vec![Node::default(); 20];
+        let seeds = [Node::random(&mut rng), Node::random(&mut rng)];
+        many_prg(&seeds[0], 2..12, &mut output[..10]);
+        many_prg(&seeds[1], 2..12, &mut output[10..]);
+        many_many_prg(&seeds, 2..12, &mut output_2);
+        assert_eq!(output, output_2);
     }
 }

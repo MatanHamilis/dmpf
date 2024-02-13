@@ -1,7 +1,7 @@
 use rand::{CryptoRng, RngCore};
 
 use crate::{
-    prg::{double_prg, many_prg, DOUBLE_PRG_CHILDREN},
+    prg::{double_prg, double_prg_many, many_many_prg, many_prg, DOUBLE_PRG_CHILDREN},
     trie::BinaryTrie,
     BitSlice, Dmpf, DmpfKey, DmpfSession, DpfOutput, Node,
 };
@@ -447,6 +447,19 @@ impl SignsCW {
     }
 }
 
+struct EvalallSigns(Vec<Node>, usize);
+impl EvalallSigns {
+    pub fn new(t: usize, depth: usize) -> Self {
+        let total_nodes_per_eval = t.div_ceil(128);
+        let total_nodes = total_nodes_per_eval << depth;
+        Self(vec![Node::default(); total_nodes], t)
+    }
+    pub fn fill_with_seeds(&mut self, seed: &Node, direction: usize) {
+        let children_low = (2 + self.0.len() * direction) as u16;
+        let children_high = children_low + self.0.len() as u16;
+        many_prg(seed, children_low..children_high, &mut self.0);
+    }
+}
 // This is used merely for PRG expansion. A t-bit long array.
 #[derive(Debug)]
 pub struct Signs(Vec<Node>, usize);
@@ -601,33 +614,43 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let input_len = self.cws.len();
         let session_left = unsafe { (&mut session.sign as *mut Signs).as_mut().unwrap() };
-        let session_right = unsafe { (&mut session.new_sign as *mut Signs).as_mut().unwrap() };
+        // let session_right = unsafe { (&mut session.new_sign as *mut Signs).as_mut().unwrap() };
         let mut eval_all_state = EvalAllState::new(self.point_count(), input_len);
+        let mut next_eval_all_state = EvalAllState::new(self.point_count(), input_len);
         let mut seeds = Vec::with_capacity(1 << input_len);
+        let mut next_seeds = Vec::with_capacity(1 << input_len);
         unsafe { seeds.set_len(1 << input_len) };
+        unsafe { next_seeds.set_len(1 << input_len) };
         seeds[0] = self.root;
         session_left.zero();
         session_left.set_bit(0, self.sign);
         eval_all_state.put_sign(0, &session_left);
         for depth in 0..input_len {
+            double_prg_many(
+                &seeds[..1 << depth],
+                &DOUBLE_PRG_CHILDREN,
+                &mut next_seeds[..1 << (depth + 1)],
+            );
+            next_eval_all_state.fill_from_seeds(&seeds[..1 << depth]);
+            (seeds, next_seeds) = (next_seeds, seeds);
             let cur_cw = &self.cws[depth];
-            for path_idx in (0..1 << depth).rev() {
-                let current_seed = seeds[path_idx];
-                session_left.fill_with_seed(&current_seed, 0);
-                session_right.fill_with_seed(&current_seed, 1);
-                let [left_seed, right_seed] = double_prg(&current_seed, &DOUBLE_PRG_CHILDREN);
-                let corrected_node = cur_cw.correct(
+            for path_idx in 0..1 << depth {
+                let session_left = unsafe { next_eval_all_state.get_sign_mut(path_idx, false) };
+                let session_right = unsafe { next_eval_all_state.get_sign_mut(path_idx, true) };
+                let corrected_node = cur_cw.correct_bits(
                     eval_all_state.iter_sign(path_idx),
                     true,
                     true,
+                    0,
                     session_left,
+                    0,
                     session_right,
+                    self.point_count(),
                 );
-                seeds[2 * path_idx] = left_seed ^ corrected_node;
-                seeds[2 * path_idx + 1] = right_seed ^ corrected_node;
-                eval_all_state.put_sign(2 * path_idx, &session_left);
-                eval_all_state.put_sign(2 * path_idx + 1, &session_right);
+                seeds[2 * path_idx] ^= corrected_node;
+                seeds[2 * path_idx + 1] ^= corrected_node;
             }
+            (next_eval_all_state, eval_all_state) = (eval_all_state, next_eval_all_state)
         }
         seeds
             .into_iter()
@@ -651,14 +674,26 @@ struct EvalAllState {
 impl EvalAllState {
     fn new(points: usize, input_len: usize) -> Self {
         let output_size = 1 << input_len;
-        let total_sign_bits = points * output_size;
-        let total_nodes = total_sign_bits.div_ceil(128);
+        // multiply by 2 because there are two directions.
+        let nodes_per_path = points.div_ceil(128) * 2;
+        let total_nodes = nodes_per_path * output_size;
         let mut signs = Vec::with_capacity(total_nodes);
         unsafe { signs.set_len(total_nodes) };
         Self { t: points, signs }
     }
+    fn fill_from_seeds(&mut self, seeds: &[Node]) {
+        let nodes_per_path = self.t.div_ceil(128) * 2;
+        let nodes_per_path_u16 = nodes_per_path as u16;
+        let output_len = seeds.len() * nodes_per_path;
+        many_many_prg(
+            seeds,
+            2..2 + nodes_per_path_u16,
+            &mut self.signs[..output_len],
+        )
+    }
     fn coordinates(&self, point: usize, bit_idx: usize) -> usize {
-        self.t * point + bit_idx
+        let nodes_per_path = self.t.div_ceil(128);
+        (point * nodes_per_path * 128) + bit_idx
     }
     fn put_sign(&mut self, point: usize, sign: &Signs) {
         let dst = self.coordinates(point, 0);
@@ -667,6 +702,14 @@ impl EvalAllState {
     fn get_sign(&self, point: usize, sign: &mut Signs) {
         let src = self.coordinates(point, 0);
         copy_bits(&self.signs, &mut sign.0, src, 0, self.t);
+    }
+    unsafe fn get_sign_mut(&self, point: usize, direction: bool) -> &mut [Node] {
+        let nodes_per_path_per_direction = self.t.div_ceil(128);
+        let nodes_per_path = nodes_per_path_per_direction * 2;
+        let start =
+            (nodes_per_path * point) + (nodes_per_path_per_direction * (direction as usize));
+        let mutable_self = unsafe { (self as *const Self as *mut Self).as_mut().unwrap() };
+        &mut mutable_self.signs[start..start + nodes_per_path_per_direction]
     }
     fn iter_sign(&self, point: usize) -> SignsIter {
         let start = self.coordinates(point, 0);
@@ -686,8 +729,8 @@ mod tests {
     }
     #[test]
     fn test() {
-        const INPUT_LEN: usize = 6;
-        const INPUTS: usize = 25;
+        const INPUT_LEN: usize = 11;
+        const INPUTS: usize = 439;
         assert!(INPUTS <= 1 << (INPUT_LEN - 1));
         let mut rng = thread_rng();
         let mut inputs_hashmap = HashMap::with_capacity(INPUTS);
@@ -702,6 +745,11 @@ mod tests {
         let (k_0, k_1) = dmpf.try_gen(INPUT_LEN, &kvs, &mut rng).unwrap();
         let eval_all_0 = k_0.eval_all();
         let eval_all_1 = k_1.eval_all();
+        let eval_all_sum: Vec<_> = eval_all_0
+            .iter()
+            .zip(eval_all_1.iter())
+            .map(|(a, b)| *a + *b)
+            .collect();
 
         for i in 0..1 << INPUT_LEN {
             let encoded_i = encode_input(i, INPUT_LEN);

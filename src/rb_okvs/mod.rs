@@ -176,6 +176,7 @@ pub enum EpsilonPercent {
     Five,
     Seven,
     Ten,
+    Hundred,
 }
 
 impl From<EpsilonPercent> for usize {
@@ -185,6 +186,7 @@ impl From<EpsilonPercent> for usize {
             EpsilonPercent::Five => 5,
             EpsilonPercent::Seven => 7,
             EpsilonPercent::Ten => 10,
+            EpsilonPercent::Hundred => 100,
         }
     }
 }
@@ -197,6 +199,7 @@ impl TryFrom<usize> for EpsilonPercent {
             5 => EpsilonPercent::Five,
             7 => EpsilonPercent::Seven,
             10 => EpsilonPercent::Ten,
+            100 => EpsilonPercent::Hundred,
             _ => return Err(()),
         })
     }
@@ -242,6 +245,7 @@ impl From<LogN> for usize {
 
 // From RB-OKVS paper appendix F.
 // Essentially for LAMBDA = 40, W ranges between 64-bit array of size 4 to 9.
+// For "Else" we follow theorem 1 from the RB-OKVS paper and show that
 pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> usize {
     let a_b_tables = [
         //epsilon = 3
@@ -279,6 +283,15 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
             (27150, 13390),
             (26910, 15210),
             (27510, 19830),
+        ],
+        // epsilon = 100
+        [
+            (274700, 6296),
+            (268500, 9339),
+            (274000, 11610),
+            (271500, 13390),
+            (269100, 15210),
+            (275100, 19830),
         ],
     ];
     let (a, b) = a_b_tables[epsilon_percent as usize][log_n as usize];
