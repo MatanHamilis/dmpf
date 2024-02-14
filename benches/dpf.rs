@@ -126,7 +126,7 @@ fn match_logn(points: usize) -> Option<LogN> {
 }
 fn bench_okvs_dmpf(c: &mut Criterion) {
     const LAMBDA: usize = 40;
-    let eps = EpsilonPercent::Hundred;
+    let eps = EpsilonPercent::Fifty;
     for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
         for points in POINTS {
             let w = g(LAMBDA, eps, match_logn(points).unwrap());
@@ -136,6 +136,14 @@ fn bench_okvs_dmpf(c: &mut Criterion) {
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 18 => {
+                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
+                33 => {
+                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
+                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                }
+                36 => {
                     let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }

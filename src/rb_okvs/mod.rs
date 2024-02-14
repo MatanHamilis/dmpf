@@ -176,6 +176,7 @@ pub enum EpsilonPercent {
     Five,
     Seven,
     Ten,
+    Fifty,
     Hundred,
 }
 
@@ -186,6 +187,7 @@ impl From<EpsilonPercent> for usize {
             EpsilonPercent::Five => 5,
             EpsilonPercent::Seven => 7,
             EpsilonPercent::Ten => 10,
+            EpsilonPercent::Fifty => 50,
             EpsilonPercent::Hundred => 100,
         }
     }
@@ -199,6 +201,7 @@ impl TryFrom<usize> for EpsilonPercent {
             5 => EpsilonPercent::Five,
             7 => EpsilonPercent::Seven,
             10 => EpsilonPercent::Ten,
+            50 => EpsilonPercent::Fifty,
             100 => EpsilonPercent::Hundred,
             _ => return Err(()),
         })
@@ -284,14 +287,23 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
             (26910, 15210),
             (27510, 19830),
         ],
+        // epsilon = 50
+        [
+            (27470 * 5, 6296),
+            (26850 * 5, 9339),
+            (27400 * 5, 11610),
+            (27150 * 5, 13390),
+            (26910 * 5, 15210),
+            (27510 * 5, 19830),
+        ],
         // epsilon = 100
         [
-            (274700, 6296),
-            (268500, 9339),
-            (274000, 11610),
-            (271500, 13390),
-            (269100, 15210),
-            (275100, 19830),
+            (27470 * 10, 6296),
+            (26850 * 10, 9339),
+            (27400 * 10, 11610),
+            (27150 * 10, 13390),
+            (26910 * 10, 15210),
+            (27510 * 10, 19830),
         ],
     ];
     let (a, b) = a_b_tables[epsilon_percent as usize][log_n as usize];
