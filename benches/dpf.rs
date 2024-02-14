@@ -132,11 +132,11 @@ fn bench_okvs_dmpf(c: &mut Criterion) {
             let w = g(LAMBDA, eps, match_logn(points).unwrap());
             match w {
                 16 => {
-                    let dpf = OkvsDmpf::<3, 16, PrimeField64x2>::new(eps);
+                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 18 => {
-                    let dpf = OkvsDmpf::<3, 18, PrimeField64x2>::new(eps);
+                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
                     bench_dmpf(c, "okvs", &dpf, input_len, points);
                 }
                 168 => {
