@@ -218,7 +218,7 @@ criterion_group!(
     name = benches;
     config = Criterion::default().configure_from_args();
     targets = bench_dpf_single,
-    // bench_dpf_dmpf
+    bench_dpf_dmpf,
     bench_big_state_dmpf,
     bench_batch_code_dmpf,
     bench_okvs_dmpf,
