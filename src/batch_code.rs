@@ -39,7 +39,7 @@ pub fn expansion_param_from_points(points: usize) -> usize {
     if points < 30 {
         100
     } else {
-        40
+        50
     }
 }
 
