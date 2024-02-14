@@ -70,6 +70,7 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             let random_point_encoded = (random_point as u128) << (128 - input_len);
             let mut f = F::default();
             let mut session = k_0.make_session();
+            k_0.eval_with_session(&random_point_encoded, &mut f, &mut session);
             b.iter(|| {
                 k_0.eval_with_session(&random_point_encoded, &mut f, &mut session);
             })
@@ -82,20 +83,15 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs),
         |b, input| {
-            let input_len = input.0;
-            let inputs = &input.1;
-            let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-            let session = k_0.make_session();
             b.iter_batched_ref(
                 || {
                     let input_len = input.0;
                     let inputs = &input.1;
                     let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
-                    let session = k_0.make_session();
-                    (k_0, session)
+                    k_0
                 },
-                |(k_0, session)| {
-                    k_0.eval_all_with_session(session);
+                |k_0| {
+                    k_0.eval_all();
                 },
                 criterion::BatchSize::NumBatches(2),
             )
