@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use rand::{CryptoRng, RngCore};
 
 use crate::{
@@ -626,6 +628,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
         session_left.set_bit(0, self.sign);
         eval_all_state.put_sign(0, &session_left);
         for depth in 0..input_len {
+            let time_depth = Instant::now();
             double_prg_many(
                 &seeds[..1 << depth],
                 &DOUBLE_PRG_CHILDREN,
@@ -634,9 +637,11 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
             next_eval_all_state.fill_from_seeds(&seeds[..1 << depth]);
             (seeds, next_seeds) = (next_seeds, seeds);
             let cur_cw = &self.cws[depth];
+            let mut duration_correcting = Duration::default();
             for path_idx in 0..1 << depth {
                 let session_left = unsafe { next_eval_all_state.get_sign_mut(path_idx, false) };
                 let session_right = unsafe { next_eval_all_state.get_sign_mut(path_idx, true) };
+                let time = Instant::now();
                 let corrected_node = cur_cw.correct_bits(
                     eval_all_state.iter_sign(path_idx),
                     true,
@@ -647,9 +652,15 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
                     session_right,
                     self.point_count(),
                 );
+                duration_correcting += time.elapsed();
                 seeds[2 * path_idx] ^= corrected_node;
                 seeds[2 * path_idx + 1] ^= corrected_node;
             }
+            println!(
+                "Correction time for depth: {}, time for depth: {}",
+                duration_correcting.as_micros(),
+                time_depth.elapsed().as_micros()
+            );
             (next_eval_all_state, eval_all_state) = (eval_all_state, next_eval_all_state)
         }
         seeds
