@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    ops::Div,
+    time::{Duration, Instant},
+};
 
 use rand::{CryptoRng, RngCore};
 
@@ -282,9 +285,7 @@ impl CW {
             signs,
             has_left,
             has_right,
-            0,
             &mut output_left.0,
-            0,
             &mut output_right.0,
             t,
         )
@@ -294,9 +295,7 @@ impl CW {
         signs: impl Iterator<Item = bool>,
         has_left: bool,
         has_right: bool,
-        left_start: usize,
         output_left: &mut [Node],
-        right_start: usize,
         output_right: &mut [Node],
         t: usize,
     ) -> Node {
@@ -311,11 +310,11 @@ impl CW {
                 correct_node ^= self.seeds[idx];
                 if has_left {
                     let coordinates = self.signs.coordinates(false, idx);
-                    xor_bits(&self.signs.1, output_left, coordinates, left_start, t);
+                    xor_bits(&self.signs.1[coordinates..], output_left, t);
                 }
                 if has_right {
                     let coordinates = self.signs.coordinates(true, idx);
-                    xor_bits(&self.signs.1, output_right, coordinates, right_start, t);
+                    xor_bits(&self.signs.1[coordinates..], output_right, t);
                 }
             });
         correct_node
@@ -337,73 +336,68 @@ impl CW {
                 }
                 correct_node ^= self.seeds[idx];
                 let coordinates = self.signs.coordinates(direction, idx);
-                xor_bits(&self.signs.1, &mut output.0, coordinates, 0, t);
+                xor_bits(&self.signs.1[coordinates..], &mut output.0, t);
             });
         correct_node
     }
 }
 
-fn move_bits(
-    src: &[Node],
-    dest: &mut [Node],
-    src_start: usize,
-    dest_start: usize,
-    bit_count: usize,
-    xor: bool,
-) {
-    let mut bits_to_take_remaining = bit_count;
-    let mut current_source_bits_pointer = src_start;
-    let mut current_dest_bits_pointer = dest_start;
-    // handle remaining nodes
-    while bits_to_take_remaining > 0 {
-        let current_bit_take_offset = current_source_bits_pointer & 127;
-        let current_bit_put_offset = current_dest_bits_pointer & 127;
-        let bits_to_take_now = usize::min(
-            usize::min(128 - current_bit_take_offset, 128 - current_bit_put_offset),
-            bits_to_take_remaining,
-        );
-
-        let take_from_idx = current_source_bits_pointer >> 7;
-        let put_into_idx = current_dest_bits_pointer >> 7;
-
-        let mut bits_taken = src[take_from_idx];
-        bits_taken.shr(current_bit_take_offset as u32);
-        bits_taken.mask_lsbs(bits_to_take_now);
-
-        bits_taken.shl(current_bit_put_offset as u32);
-        // This is since we don't assume dest is zeroed.
-        if !xor {
-            dest[put_into_idx].mask_bits_lsbs(
-                current_bit_put_offset,
-                current_bit_put_offset + bits_to_take_now,
-            );
-        }
-        dest[put_into_idx] ^= bits_taken;
-
-        // Update pointers
-        current_source_bits_pointer += bits_to_take_now;
-        current_dest_bits_pointer += bits_to_take_now;
-        bits_to_take_remaining -= bits_to_take_now;
+fn xor_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
+    let to_move = (bit_count + 127) >> 7;
+    for i in 0..to_move {
+        dest[i] ^= src[i];
     }
+    // src[to_move - 1] ^= dest[to_move - 1];
 }
-fn xor_bits(
-    src: &[Node],
-    dest: &mut [Node],
-    src_start: usize,
-    dest_start: usize,
-    bit_count: usize,
-) {
-    move_bits(src, dest, src_start, dest_start, bit_count, true)
+fn copy_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
+    let to_move = (bit_count + 127) >> 7;
+    for i in 0..to_move {
+        dest[i] = src[i];
+    }
+    // src[to_move - 1] ^= dest[to_move - 1];
 }
-fn copy_bits(
-    src: &[Node],
-    dest: &mut [Node],
-    src_start: usize,
-    dest_start: usize,
-    bit_count: usize,
-) {
-    move_bits(src, dest, src_start, dest_start, bit_count, false)
-}
+// fn move_bits(src: &[Node], dest: &mut [Node], bit_count: usize, xor: bool) {
+//     let mut bits_to_take_remaining = bit_count;
+//     let mut current_source_bits_pointer = src_start;
+//     let mut current_dest_bits_pointer = dest_start;
+//     // handle remaining nodes
+//     while bits_to_take_remaining > 0 {
+//         let current_bit_take_offset = current_source_bits_pointer & 127;
+//         let current_bit_put_offset = current_dest_bits_pointer & 127;
+//         let bits_to_take_now = usize::min(
+//             usize::min(128 - current_bit_take_offset, 128 - current_bit_put_offset),
+//             bits_to_take_remaining,
+//         );
+
+//         let take_from_idx = current_source_bits_pointer >> 7;
+//         let put_into_idx = current_dest_bits_pointer >> 7;
+
+//         let mut bits_taken = src[take_from_idx];
+//         bits_taken.shr(current_bit_take_offset as u32);
+//         bits_taken.mask_lsbs(bits_to_take_now);
+
+//         bits_taken.shl(current_bit_put_offset as u32);
+//         // This is since we don't assume dest is zeroed.
+//         if !xor {
+//             dest[put_into_idx].mask_bits_lsbs(
+//                 current_bit_put_offset,
+//                 current_bit_put_offset + bits_to_take_now,
+//             );
+//         }
+//         dest[put_into_idx] ^= bits_taken;
+
+//         // Update pointers
+//         current_source_bits_pointer += bits_to_take_now;
+//         current_dest_bits_pointer += bits_to_take_now;
+//         bits_to_take_remaining -= bits_to_take_now;
+//     }
+// }
+// fn xor_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
+//     move_bits(src, dest, bit_count, true)
+// }
+// fn copy_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
+//     move_bits(src, dest, bit_count, false)
+// }
 
 // This is used to store the signs of the CWs.
 // Each CW is of length t*(Lambda + 2*t) bits.
@@ -414,61 +408,48 @@ impl SignsCW {
     pub fn new(t: usize, depth: usize, mut rng: impl RngCore + CryptoRng) -> Self {
         // At depth 'depth' there are at most 1<<depth non-zero paths.
         let min = usize::min(t, 1 << depth);
-        let total_bits = t * min * 2;
-        let total_nodes = total_bits.div_ceil(128);
+        let nodes_per_point_per_direction = t.div_ceil(128);
+        let total_nodes = 2 * min * nodes_per_point_per_direction;
         let v = (0..total_nodes).map(|_| Node::random(&mut rng)).collect();
         Self(t, v)
     }
 
     fn coordinates(&self, direction: bool, point_idx: usize) -> usize {
         let t = self.0;
-        point_idx * (2 * t) + (direction as usize) * t
+        let nodes_per_point_per_direction = t.div_ceil(128);
+        let nodes_per_point = 2 * nodes_per_point_per_direction;
+        (point_idx * nodes_per_point) + (direction as usize) * nodes_per_point_per_direction
     }
 
     pub fn get_sign(&self, input_sign: &mut Signs, direction: bool, point_idx: usize) {
         let t = self.0;
         let src_start = self.coordinates(direction, point_idx);
-        let dest_start = 0;
         let bit_count = t;
-        copy_bits(&self.1, &mut input_sign.0, src_start, dest_start, bit_count)
+        copy_bits(&self.1[src_start..], &mut input_sign.0, bit_count)
     }
 
     pub fn put_sign(&mut self, input_sign: &Signs, direction: bool, point_idx: usize) {
         let t = self.0;
-        let src_start = 0;
         let dest_start = self.coordinates(direction, point_idx);
         let bit_count = t;
-        copy_bits(&input_sign.0, &mut self.1, src_start, dest_start, bit_count)
+        copy_bits(&input_sign.0, &mut self.1[dest_start..], bit_count)
     }
     pub fn flip_bit(&mut self, direction: bool, point_idx: usize, bit_idx: usize) {
-        let coordinates = self.coordinates(direction, point_idx) + bit_idx;
-        let node_idx = coordinates / 128;
-        let in_node_idx = coordinates & 127;
+        let coordinates = self.coordinates(direction, point_idx);
+        let node_idx = coordinates + (bit_idx / 128);
+        let in_node_idx = bit_idx & 127;
         let xor_node = Node::from(1u128 << in_node_idx);
         self.1[node_idx] ^= xor_node;
     }
 }
 
-struct EvalallSigns(Vec<Node>, usize);
-impl EvalallSigns {
-    pub fn new(t: usize, depth: usize) -> Self {
-        let total_nodes_per_eval = t.div_ceil(128);
-        let total_nodes = total_nodes_per_eval << depth;
-        Self(vec![Node::default(); total_nodes], t)
-    }
-    pub fn fill_with_seeds(&mut self, seed: &Node, direction: usize) {
-        let children_low = (2 + self.0.len() * direction) as u16;
-        let children_high = children_low + self.0.len() as u16;
-        many_prg(seed, children_low..children_high, &mut self.0);
-    }
-}
 // This is used merely for PRG expansion. A t-bit long array.
 #[derive(Debug)]
 pub struct Signs(Vec<Node>, usize);
 
 impl Signs {
     pub fn new(t: usize) -> Self {
-        let total_nodes = t.div_ceil(128);
+        let total_nodes = (t + 127) >> 7;
         Self(vec![Node::default(); total_nodes], t)
     }
     pub fn zero(&mut self) {
@@ -486,12 +467,12 @@ impl Signs {
             .for_each(|(di, (ai, bi))| *di = ai ^ bi);
     }
     pub fn set_bit(&mut self, bit_idx: usize, value: bool) {
-        let node_idx = bit_idx / 128;
+        let node_idx = bit_idx >> 7;
         let in_node_idx = bit_idx & 127;
         self.0[node_idx].set_bit_lsb(in_node_idx, value);
     }
     pub fn get_bit(&mut self, bit_idx: usize) -> bool {
-        let node_idx = bit_idx / 128;
+        let node_idx = bit_idx >> 7;
         let in_node_idx = bit_idx & 127;
         self.0[node_idx].get_bit_lsb(in_node_idx)
     }
@@ -519,7 +500,7 @@ impl<'a> Iterator for SignsIter<'a> {
         if self.cur_idx == self.dst_idx {
             return None;
         }
-        let idx = self.cur_idx / 128;
+        let idx = self.cur_idx >> 7;
         let in_node_idx = self.cur_idx & 127;
         self.cur_idx += 1;
         Some(self.src[idx].get_bit_lsb(in_node_idx))
@@ -529,34 +510,34 @@ impl<'a> Iterator for SignsIter<'a> {
 // This is used merely to maintain the state during PRG.
 // This is essentially a t x t boolean array.
 #[derive(Clone)]
-pub struct KeyGenSigns(usize, Vec<Node>);
+pub struct KeyGenSigns(usize, Vec<Node>, usize);
 impl KeyGenSigns {
     pub fn new(t: usize) -> Self {
-        let total_nodes = (t * t).div_ceil(128);
+        let nodes_per_point = t.div_ceil(128);
+        let total_nodes = t * nodes_per_point;
         let signs = vec![Node::default(); total_nodes];
-        Self(t, signs)
+        Self(t, signs, nodes_per_point)
     }
     fn set_bit(&mut self, point: usize, bit_idx: usize, value: bool) {
-        let bit_idx = self.coordinates(point) + bit_idx;
-        let node_idx = bit_idx / 128;
+        let node_idx = self.coordinates(point) + (bit_idx >> 7);
         let in_node_idx = bit_idx & 127;
         self.1[node_idx].set_bit_lsb(in_node_idx, value)
     }
     fn get_bit(&self, point: usize, bit_idx: usize) -> bool {
-        let bit_idx = self.coordinates(point) + bit_idx;
-        let node_idx = bit_idx / 128;
+        let node_idx = self.coordinates(point) + (bit_idx >> 7);
         let in_node_idx = bit_idx & 127;
         self.1[node_idx].get_bit_lsb(in_node_idx)
     }
     fn set_signs(&mut self, point: usize, signs: &Signs) {
-        let bit_idx = self.coordinates(point);
-        copy_bits(&signs.0, &mut self.1, 0, bit_idx, self.0);
+        let node_idx = self.coordinates(point);
+        copy_bits(&signs.0, &mut self.1[node_idx..], self.0);
     }
     fn coordinates(&self, point: usize) -> usize {
-        self.0 * point
+        self.2 * point
     }
     fn iter(&self, point: usize) -> SignsIter {
-        SignsIter::new(&self.1, self.coordinates(point), self.0)
+        let coords = self.coordinates(point);
+        SignsIter::new(&self.1[coords..], 0, self.0)
     }
 }
 
@@ -628,7 +609,6 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
         session_left.set_bit(0, self.sign);
         eval_all_state.put_sign(0, &session_left);
         for depth in 0..input_len {
-            let time_depth = Instant::now();
             double_prg_many(
                 &seeds[..1 << depth],
                 &DOUBLE_PRG_CHILDREN,
@@ -637,30 +617,22 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
             next_eval_all_state.fill_from_seeds(&seeds[..1 << depth]);
             (seeds, next_seeds) = (next_seeds, seeds);
             let cur_cw = &self.cws[depth];
-            let mut duration_correcting = Duration::default();
             for path_idx in 0..1 << depth {
-                let session_left = unsafe { next_eval_all_state.get_sign_mut(path_idx, false) };
-                let session_right = unsafe { next_eval_all_state.get_sign_mut(path_idx, true) };
-                let time = Instant::now();
+                let session_left =
+                    unsafe { next_eval_all_state.get_sign_mut_after_expansion(path_idx, false) };
+                let session_right =
+                    unsafe { next_eval_all_state.get_sign_mut_after_expansion(path_idx, true) };
                 let corrected_node = cur_cw.correct_bits(
                     eval_all_state.iter_sign(path_idx),
                     true,
                     true,
-                    0,
                     session_left,
-                    0,
                     session_right,
                     self.point_count(),
                 );
-                duration_correcting += time.elapsed();
                 seeds[2 * path_idx] ^= corrected_node;
                 seeds[2 * path_idx + 1] ^= corrected_node;
             }
-            println!(
-                "Correction time for depth: {}, time for depth: {}",
-                duration_correcting.as_micros(),
-                time_depth.elapsed().as_micros()
-            );
             (next_eval_all_state, eval_all_state) = (eval_all_state, next_eval_all_state)
         }
         seeds
@@ -681,50 +653,54 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
 struct EvalAllState {
     t: usize,
     signs: Vec<Node>,
+    nodes_per_path: usize,
 }
 impl EvalAllState {
     fn new(points: usize, input_len: usize) -> Self {
         let output_size = 1 << input_len;
         // multiply by 2 because there are two directions.
-        let nodes_per_path = points.div_ceil(128) * 2;
-        let total_nodes = nodes_per_path * output_size;
+        let nodes_per_path_after_expand = points.div_ceil(128) * 2;
+        let total_nodes = nodes_per_path_after_expand * output_size;
         let mut signs = Vec::with_capacity(total_nodes);
         unsafe { signs.set_len(total_nodes) };
-        Self { t: points, signs }
+        Self {
+            t: points,
+            signs,
+            nodes_per_path: points.div_ceil(128),
+        }
     }
     fn fill_from_seeds(&mut self, seeds: &[Node]) {
-        let nodes_per_path = self.t.div_ceil(128) * 2;
-        let nodes_per_path_u16 = nodes_per_path as u16;
-        let output_len = seeds.len() * nodes_per_path;
+        let nodes_per_path_after_expand = self.nodes_per_path * 2;
+        let nodes_per_path_u16 = nodes_per_path_after_expand as u16;
+        let output_len = seeds.len() * nodes_per_path_after_expand;
         many_many_prg(
             seeds,
             2..2 + nodes_per_path_u16,
             &mut self.signs[..output_len],
         )
     }
-    fn coordinates(&self, point: usize, bit_idx: usize) -> usize {
-        let nodes_per_path = self.t.div_ceil(128);
-        (point * nodes_per_path * 128) + bit_idx
+    fn coordinates(&self, point: usize) -> usize {
+        point * self.nodes_per_path
     }
     fn put_sign(&mut self, point: usize, sign: &Signs) {
-        let dst = self.coordinates(point, 0);
-        copy_bits(&sign.0, &mut self.signs, 0, dst, self.t);
+        let dst = self.coordinates(point);
+        copy_bits(&sign.0, &mut self.signs[dst..], self.t);
     }
     fn get_sign(&self, point: usize, sign: &mut Signs) {
-        let src = self.coordinates(point, 0);
-        copy_bits(&self.signs, &mut sign.0, src, 0, self.t);
+        let src = self.coordinates(point);
+        copy_bits(&self.signs[src..], &mut sign.0, self.t);
     }
-    unsafe fn get_sign_mut(&self, point: usize, direction: bool) -> &mut [Node] {
-        let nodes_per_path_per_direction = self.t.div_ceil(128);
-        let nodes_per_path = nodes_per_path_per_direction * 2;
-        let start =
-            (nodes_per_path * point) + (nodes_per_path_per_direction * (direction as usize));
+    unsafe fn get_sign_mut_after_expansion(&self, point: usize, direction: bool) -> &mut [Node] {
+        let nodes_per_path_per_direction = self.nodes_per_path;
+        let nodes_per_path_after_expand = nodes_per_path_per_direction * 2;
+        let start = (nodes_per_path_after_expand * point)
+            + (nodes_per_path_per_direction * (direction as usize));
         let mutable_self = unsafe { (self as *const Self as *mut Self).as_mut().unwrap() };
         &mut mutable_self.signs[start..start + nodes_per_path_per_direction]
     }
     fn iter_sign(&self, point: usize) -> SignsIter {
-        let start = self.coordinates(point, 0);
-        SignsIter::new(&self.signs, start, self.t)
+        let start = self.coordinates(point);
+        SignsIter::new(&self.signs[start..], 0, self.t)
     }
 }
 
