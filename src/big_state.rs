@@ -403,7 +403,7 @@ fn copy_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
 // Each CW is of length t*(Lambda + 2*t) bits.
 // This struct stores the 2*t*t sign bits.
 #[derive(Debug, Clone)]
-pub struct SignsCW(usize, Vec<Node>);
+pub struct SignsCW(usize, Vec<Node>, usize);
 impl SignsCW {
     pub fn new(t: usize, depth: usize, mut rng: impl RngCore + CryptoRng) -> Self {
         // At depth 'depth' there are at most 1<<depth non-zero paths.
@@ -411,14 +411,13 @@ impl SignsCW {
         let nodes_per_point_per_direction = t.div_ceil(128);
         let total_nodes = 2 * min * nodes_per_point_per_direction;
         let v = (0..total_nodes).map(|_| Node::random(&mut rng)).collect();
-        Self(t, v)
+        Self(t, v, nodes_per_point_per_direction)
     }
 
     fn coordinates(&self, direction: bool, point_idx: usize) -> usize {
-        let t = self.0;
-        let nodes_per_point_per_direction = t.div_ceil(128);
-        let nodes_per_point = 2 * nodes_per_point_per_direction;
-        (point_idx * nodes_per_point) + (direction as usize) * nodes_per_point_per_direction
+        let nodes_per_point_per_direction = self.2;
+        // let nodes_per_point = 2 * nodes_per_point_per_direction;
+        ((point_idx << 1) + (direction as usize)) * nodes_per_point_per_direction
     }
 
     pub fn get_sign(&self, input_sign: &mut Signs, direction: bool, point_idx: usize) {
