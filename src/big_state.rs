@@ -608,6 +608,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
         session_left.set_bit(0, self.sign);
         eval_all_state.put_sign(0, &session_left);
         for depth in 0..input_len {
+            let depth_time = Instant::now();
             double_prg_many(
                 &seeds[..1 << depth],
                 &DOUBLE_PRG_CHILDREN,
@@ -615,6 +616,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
             );
             next_eval_all_state.fill_from_seeds(&seeds[..1 << depth]);
             (seeds, next_seeds) = (next_seeds, seeds);
+            let prg_end_time = Instant::now();
             let cur_cw = &self.cws[depth];
             for path_idx in 0..1 << depth {
                 let session_left =
@@ -632,9 +634,18 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
                 seeds[2 * path_idx] ^= corrected_node;
                 seeds[2 * path_idx + 1] ^= corrected_node;
             }
+            let correct_time = Instant::now();
+            let prg_duration = prg_end_time - depth_time;
+            let correct_duration = correct_time - prg_end_time;
+            println!(
+                "Correct: {}, prg:{}",
+                correct_duration.as_millis(),
+                prg_duration.as_millis()
+            );
             (next_eval_all_state, eval_all_state) = (eval_all_state, next_eval_all_state)
         }
-        seeds
+        let end_start = Instant::now();
+        let o = seeds
             .into_iter()
             .enumerate()
             .map(|(idx, seed)| {
@@ -646,7 +657,9 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
                     o
                 }
             })
-            .collect()
+            .collect();
+        let end_end = end_start.elapsed();
+        println!("Conv: {}", end_end.as_millis());
     }
 }
 struct EvalAllState {
