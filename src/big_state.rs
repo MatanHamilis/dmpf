@@ -11,10 +11,12 @@ use crate::{
     BitSlice, Dmpf, DmpfKey, DmpfSession, DpfOutput, Node,
 };
 
-pub struct BigStateDmpf;
+pub struct BigStateDmpf {
+    batch_size: usize,
+}
 impl BigStateDmpf {
-    pub fn new() -> Self {
-        Self
+    pub fn new(batch_size: usize) -> Self {
+        Self { batch_size }
     }
 }
 
@@ -176,7 +178,14 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
             );
         }
         // Handling output part
-        let conv_cw = ConvCW::gen(inputs, &seed_0, &seed_1, &signs_0, &signs_1);
+        let conv_cw = ConvCW::gen(
+            inputs,
+            &seed_0,
+            &seed_1,
+            &signs_0,
+            &signs_1,
+            self.batch_size,
+        );
         let key_0 = BigStateDmpfKey {
             root: root_0,
             sign: false,
@@ -194,7 +203,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
 }
 
 #[derive(Debug, Clone)]
-struct ConvCW<Output: DpfOutput>(Vec<Output>);
+struct ConvCW<Output: DpfOutput>(Vec<Output>, usize, Vec<Vec<Output>>);
 impl<Output: DpfOutput> ConvCW<Output> {
     // kvs are sorted, so it's ok.
     fn gen(
@@ -203,31 +212,44 @@ impl<Output: DpfOutput> ConvCW<Output> {
         seed_1: &[Node],
         sign_0: &KeyGenSigns,
         _: &KeyGenSigns,
+        batching_factor: usize,
     ) -> Self {
-        Self(
-            kvs.iter()
-                .zip(seed_0.iter())
-                .zip(seed_1.iter())
-                .enumerate()
-                .map(|(idx, ((kv, s0), s1))| {
-                    let o1 = Output::from(*s1);
-                    let o0 = Output::from(*s0);
-                    let cw = o0 - o1 - kv.1;
-                    if sign_0.get_bit(idx, idx) {
-                        -cw
-                    } else {
-                        cw
+        let o: Vec<_> = kvs
+            .iter()
+            .zip(seed_0.iter())
+            .zip(seed_1.iter())
+            .enumerate()
+            .map(|(idx, ((kv, s0), s1))| {
+                let o1 = Output::from(*s1);
+                let o0 = Output::from(*s0);
+                let cw = o0 - o1 - kv.1;
+                if sign_0.get_bit(idx, idx) {
+                    -cw
+                } else {
+                    cw
+                }
+            })
+            .collect();
+        let vecs = o
+            .chunks(batching_factor)
+            .map(|oc| {
+                let mut v = Vec::with_capacity(1 << oc.len());
+                v.push(Output::default());
+                for i in 0..oc.len() {
+                    for j in 0..v.len() {
+                        v.push(v[j] + oc[i])
                     }
-                })
-                .collect(),
-        )
+                }
+                debug_assert_eq!(v.len(), 1 << oc.len());
+                v
+            })
+            .collect();
+        Self(o, batching_factor, vecs)
     }
     fn conv_correct(&self, sign: &Signs) -> Output {
         let mut o = Output::default();
-        for (b, oi) in sign.iter().zip(self.0.iter()) {
-            if b {
-                o += *oi;
-            }
+        for (b, oi) in sign.iter_chunk(self.1).zip(self.2.iter()) {
+            o += oi[b];
         }
         o
     }
@@ -478,6 +500,48 @@ impl Signs {
     fn iter(&self) -> SignsIter<'_> {
         SignsIter::new(&self.0, 0, self.1)
     }
+    fn iter_chunk(&self, chunk_size: usize) -> SignsIterChunk<'_> {
+        SignsIterChunk::new(&self.0, 0, self.1, chunk_size)
+    }
+}
+struct SignsIterChunk<'a> {
+    src: &'a [Node],
+    ptr: &'a [usize],
+    cur_idx: usize,
+    dst_idx: usize,
+    chunk_size_bits: usize,
+    mask: usize,
+}
+impl<'a> SignsIterChunk<'a> {
+    fn new(src: &'a [Node], start: usize, count: usize, chunk_size_bits: usize) -> Self {
+        let ptr =
+            unsafe { std::slice::from_raw_parts(src.as_ptr() as *const usize, src.len() * 2) };
+        Self {
+            src,
+            ptr,
+            cur_idx: start,
+            dst_idx: start + count,
+            chunk_size_bits,
+            mask: (1 << chunk_size_bits) - 1,
+        }
+    }
+}
+impl<'a> Iterator for SignsIterChunk<'a> {
+    type Item = usize;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_idx == self.dst_idx {
+            return None;
+        }
+        let idx = self.cur_idx >> 6;
+        let in_node_idx = self.cur_idx & 63;
+        let mut bits = (self.ptr[idx] >> in_node_idx) & self.mask;
+        let rem_bits = self.dst_idx - self.cur_idx;
+        if rem_bits < self.chunk_size_bits {
+            bits &= (1 << rem_bits) - 1;
+        }
+        self.cur_idx += self.chunk_size_bits;
+        Some(bits)
+    }
 }
 struct SignsIter<'a> {
     src: &'a [Node],
@@ -660,6 +724,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
             .collect();
         let end_end = end_start.elapsed();
         println!("Conv: {}", end_end.as_millis());
+        o
     }
 }
 struct EvalAllState {
@@ -730,6 +795,7 @@ mod tests {
     fn test() {
         const INPUT_LEN: usize = 11;
         const INPUTS: usize = 439;
+        const BATCH_SIZE: usize = 1;
         assert!(INPUTS <= 1 << (INPUT_LEN - 1));
         let mut rng = thread_rng();
         let mut inputs_hashmap = HashMap::with_capacity(INPUTS);
@@ -740,15 +806,10 @@ mod tests {
         let mut kvs: Vec<_> = inputs_hashmap.iter().map(|(k, v)| (*k, *v)).collect();
         kvs.sort_by_cached_key(|v| v.0);
 
-        let dmpf = BigStateDmpf::new();
+        let dmpf = BigStateDmpf::new(BATCH_SIZE);
         let (k_0, k_1) = dmpf.try_gen(INPUT_LEN, &kvs, &mut rng).unwrap();
         let eval_all_0 = k_0.eval_all();
         let eval_all_1 = k_1.eval_all();
-        let eval_all_sum: Vec<_> = eval_all_0
-            .iter()
-            .zip(eval_all_1.iter())
-            .map(|(a, b)| *a + *b)
-            .collect();
 
         for i in 0..1 << INPUT_LEN {
             let encoded_i = encode_input(i, INPUT_LEN);
