@@ -97,7 +97,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                 sign_cw.put_sign(&new_signs_delta_left, false, idx);
                 sign_cw.put_sign(&new_signs_delta_right, true, idx);
             });
-            let cw = CW::gen_cw(depth, &trie, sign_cw, seeds, &mut rng);
+            let cw = CW::gen_cw(depth, &trie, sign_cw, seeds, &mut rng, self.batch_size);
 
             // Update state
             let mut next_position = 0usize;
@@ -125,14 +125,14 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                     }
 
                     let correct_seed_0 = cw.correct(
-                        signs_0.iter(idx),
+                        signs_0.iter_batched(idx, self.batch_size),
                         has_left,
                         has_right,
                         &mut new_signs_0_left,
                         &mut new_signs_0_right,
                     );
                     let correct_seed_1 = cw.correct(
-                        signs_1.iter(idx),
+                        signs_1.iter_batched(idx, self.batch_size),
                         has_left,
                         has_right,
                         &mut new_signs_1_left,
@@ -235,9 +235,9 @@ impl<Output: DpfOutput> ConvCW<Output> {
             .map(|oc| {
                 let mut v = Vec::with_capacity(1 << oc.len());
                 v.push(Output::default());
-                for i in 0..oc.len() {
+                for i in oc {
                     for j in 0..v.len() {
-                        v.push(v[j] + oc[i])
+                        v.push(v[j] + *i)
                     }
                 }
                 debug_assert_eq!(v.len(), 1 << oc.len());
@@ -260,6 +260,9 @@ impl<Output: DpfOutput> ConvCW<Output> {
 struct CW {
     seeds: Vec<Node>,
     signs: SignsCW,
+    precomputed_seeds: Vec<Vec<Node>>,
+    precomputed_signs: PrecomputedSignsCW,
+    batch_size: usize,
 }
 impl CW {
     fn gen_cw(
@@ -268,6 +271,7 @@ impl CW {
         mut signs: SignsCW,
         mut seeds: Vec<Node>,
         mut rng: impl RngCore + CryptoRng,
+        batch_size: usize,
     ) -> Self {
         let t = signs.0;
         let min = t.min(1 << depth);
@@ -291,12 +295,32 @@ impl CW {
         while seeds.len() < min {
             seeds.push(Node::random(&mut rng));
         }
+        let precomputed_seeds = seeds
+            .chunks(batch_size)
+            .map(|oc| {
+                let mut v = Vec::with_capacity(1 << oc.len());
+                v.push(Node::default());
+                for io in oc {
+                    for j in 0..v.len() {
+                        v.push(v[j] ^ *io)
+                    }
+                }
+                v
+            })
+            .collect();
+        let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
 
-        Self { seeds, signs }
+        Self {
+            precomputed_signs,
+            precomputed_seeds,
+            seeds,
+            signs,
+            batch_size,
+        }
     }
     fn correct(
         &self,
-        signs: impl Iterator<Item = bool>,
+        signs: impl Iterator<Item = usize>,
         has_left: bool,
         has_right: bool,
         output_left: &mut Signs,
@@ -314,7 +338,7 @@ impl CW {
     }
     fn correct_bits(
         &self,
-        signs: impl Iterator<Item = bool>,
+        signs: impl Iterator<Item = usize>,
         has_left: bool,
         has_right: bool,
         output_left: &mut [Node],
@@ -325,18 +349,23 @@ impl CW {
         signs
             .enumerate()
             .take(self.seeds.len())
-            .for_each(|(idx, bit)| {
-                if !bit {
-                    return;
-                }
-                correct_node ^= self.seeds[idx];
+            .for_each(|(idx, bits)| {
+                // if !bit {
+                //     return;
+                // }
+                // correct_node ^= self.seeds[idx];
+                correct_node ^= self.precomputed_seeds[idx][bits];
                 if has_left {
-                    let coordinates = self.signs.coordinates(false, idx);
-                    xor_bits(&self.signs.1[coordinates..], output_left, t);
+                    // let coordinates = self.signs.coordinates(false, idx);
+                    self.precomputed_signs
+                        .xor_point_into(output_left, idx, bits, false);
+                    // xor_bits(&self.signs.1[coordinates..], output_left, t);
                 }
                 if has_right {
-                    let coordinates = self.signs.coordinates(true, idx);
-                    xor_bits(&self.signs.1[coordinates..], output_right, t);
+                    self.precomputed_signs
+                        .xor_point_into(output_right, idx, bits, true);
+                    // let coordinates = self.signs.coordinates(true, idx);
+                    // xor_bits(&self.signs.1[coordinates..], output_right, t);
                 }
             });
         correct_node
@@ -435,6 +464,14 @@ impl SignsCW {
         let v = (0..total_nodes).map(|_| Node::random(&mut rng)).collect();
         Self(t, v, nodes_per_point_per_direction)
     }
+    pub fn new_clear(t: usize, depth: usize) -> Self {
+        // At depth 'depth' there are at most 1<<depth non-zero paths.
+        let min = usize::min(t, 1 << depth);
+        let nodes_per_point_per_direction = t.div_ceil(128);
+        let total_nodes = 2 * min * nodes_per_point_per_direction;
+        let v = (0..total_nodes).map(|_| Node::default()).collect();
+        Self(t, v, nodes_per_point_per_direction)
+    }
 
     fn coordinates(&self, direction: bool, point_idx: usize) -> usize {
         let nodes_per_point_per_direction = self.2;
@@ -461,6 +498,63 @@ impl SignsCW {
         let in_node_idx = bit_idx & 127;
         let xor_node = Node::from(1u128 << in_node_idx);
         self.1[node_idx] ^= xor_node;
+    }
+}
+#[derive(Debug, Clone)]
+pub struct PrecomputedSignsCW {
+    v: Vec<Vec<Node>>,
+    batch_size: usize,
+    t: usize,
+    nodes_per_direction: usize,
+    nodes_per_entry: usize,
+}
+impl PrecomputedSignsCW {
+    pub fn new(signs: &SignsCW, batch_size: usize) -> Self {
+        let t = signs.0;
+        let nodes_per_direction = t.div_ceil(128);
+        let nodes_per_entry = 2 * nodes_per_direction;
+        let min_entries = signs.1.len() / (2 * nodes_per_direction);
+        let v = signs
+            .1
+            .chunks(batch_size * nodes_per_entry)
+            .map(|oc| {
+                let cur_batch_size = oc.len() / nodes_per_entry;
+                let mut v = Vec::with_capacity(nodes_per_entry << cur_batch_size);
+                for i in 0..nodes_per_entry {
+                    v.push(Node::default());
+                }
+                for io in oc.chunks_exact(nodes_per_entry) {
+                    for entry_id in 0..v.len() / nodes_per_entry {
+                        let entry_base = entry_id * nodes_per_entry;
+                        for (idx, io) in io.iter().enumerate() {
+                            v.push(v[entry_base + idx] ^ *io);
+                        }
+                    }
+                }
+                v
+            })
+            .collect();
+        Self {
+            v,
+            batch_size,
+            t,
+            nodes_per_direction,
+            nodes_per_entry,
+        }
+    }
+    pub fn xor_point_into(
+        &self,
+        output: &mut [Node],
+        batch_idx: usize,
+        in_batch_idx: usize,
+        direction: bool,
+    ) {
+        xor_bits(
+            &self.v[batch_idx][in_batch_idx * self.nodes_per_entry
+                + (direction as usize) * self.nodes_per_direction..],
+            output,
+            self.t,
+        )
     }
 }
 
@@ -602,6 +696,10 @@ impl KeyGenSigns {
         let coords = self.coordinates(point);
         SignsIter::new(&self.1[coords..], 0, self.0)
     }
+    fn iter_batched(&self, point: usize, batch_size: usize) -> SignsIterChunk {
+        let coords = self.coordinates(point);
+        SignsIterChunk::new(&self.1[coords..], 0, self.0, batch_size)
+    }
 }
 
 pub struct BigStateDmpfKey<Output: DpfOutput> {
@@ -688,7 +786,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
                 let session_right =
                     unsafe { next_eval_all_state.get_sign_mut_after_expansion(path_idx, true) };
                 let corrected_node = cur_cw.correct_bits(
-                    eval_all_state.iter_sign(path_idx),
+                    eval_all_state.iter_batched_sign(path_idx, cur_cw.batch_size),
                     true,
                     true,
                     session_left,
@@ -778,6 +876,10 @@ impl EvalAllState {
     fn iter_sign(&self, point: usize) -> SignsIter {
         let start = self.coordinates(point);
         SignsIter::new(&self.signs[start..], 0, self.t)
+    }
+    fn iter_batched_sign(&self, point: usize, chunk_size_bits: usize) -> SignsIterChunk {
+        let start = self.coordinates(point);
+        SignsIterChunk::new(&self.signs[start..], 0, self.t, chunk_size_bits)
     }
 }
 
