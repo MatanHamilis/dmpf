@@ -248,11 +248,10 @@ impl<Output: DpfOutput> ConvCW<Output> {
         Self(o, batching_factor, vecs)
     }
     fn conv_correct(&self, sign: &Signs) -> Output {
-        let mut o = Output::default();
-        for (b, oi) in sign.iter_chunk(self.1).zip(self.2.iter()) {
-            o += oi[b];
-        }
-        o
+        sign.iter_chunk(self.1)
+            .zip(self.2.iter())
+            .map(|(b, oi)| oi[b])
+            .sum()
     }
 }
 

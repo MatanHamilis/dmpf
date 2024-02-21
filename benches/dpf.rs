@@ -222,12 +222,21 @@ fn bench_big_state_dmpf(c: &mut Criterion) {
     }
 }
 
+fn bench_big_state_dmpf_node(c: &mut Criterion) {
+    let dpf = BigStateDmpf::new(4);
+    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+        for points in POINTS {
+            bench_dmpf::<Node, _>(c, "big_state_node", &dpf, input_len, points);
+        }
+    }
+}
 criterion_group!(
     name = benches;
     config = Criterion::default().configure_from_args();
     targets = bench_dpf_single,
     bench_dpf_dmpf,
     bench_big_state_dmpf,
+    bench_big_state_dmpf_node,
     bench_batch_code_dmpf,
     bench_okvs_dmpf,
 );
