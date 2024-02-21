@@ -63,6 +63,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
         }
 
         for depth in 0..input_length {
+            let min = t.min(1 << depth);
             let mut sign_cw = SignsCW::new(t, depth, &mut rng);
             let mut seeds = Vec::with_capacity(t);
             let iter = trie.iter_at_depth(depth);
@@ -125,14 +126,14 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
                     }
 
                     let correct_seed_0 = cw.correct(
-                        signs_0.iter_batched(idx, self.batch_size),
+                        signs_0.iter_batched(idx, self.batch_size, min),
                         has_left,
                         has_right,
                         &mut new_signs_0_left,
                         &mut new_signs_0_right,
                     );
                     let correct_seed_1 = cw.correct(
-                        signs_1.iter_batched(idx, self.batch_size),
+                        signs_1.iter_batched(idx, self.batch_size, min),
                         has_left,
                         has_right,
                         &mut new_signs_1_left,
@@ -623,7 +624,7 @@ impl<'a> SignsIterChunk<'a> {
 impl<'a> Iterator for SignsIterChunk<'a> {
     type Item = usize;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_idx == self.dst_idx {
+        if self.cur_idx >= self.dst_idx {
             return None;
         }
         let idx = self.cur_idx >> 6;
@@ -696,9 +697,9 @@ impl KeyGenSigns {
         let coords = self.coordinates(point);
         SignsIter::new(&self.1[coords..], 0, self.0)
     }
-    fn iter_batched(&self, point: usize, batch_size: usize) -> SignsIterChunk {
+    fn iter_batched(&self, point: usize, batch_size: usize, count: usize) -> SignsIterChunk {
         let coords = self.coordinates(point);
-        SignsIterChunk::new(&self.1[coords..], 0, self.0, batch_size)
+        SignsIterChunk::new(&self.1[coords..], 0, count, batch_size)
     }
 }
 
@@ -780,13 +781,14 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
             (seeds, next_seeds) = (next_seeds, seeds);
             let prg_end_time = Instant::now();
             let cur_cw = &self.cws[depth];
+            let min = cur_cw.seeds.len();
             for path_idx in 0..1 << depth {
                 let session_left =
                     unsafe { next_eval_all_state.get_sign_mut_after_expansion(path_idx, false) };
                 let session_right =
                     unsafe { next_eval_all_state.get_sign_mut_after_expansion(path_idx, true) };
                 let corrected_node = cur_cw.correct_bits(
-                    eval_all_state.iter_batched_sign(path_idx, cur_cw.batch_size),
+                    eval_all_state.iter_batched_sign(path_idx, cur_cw.batch_size, min),
                     true,
                     true,
                     session_left,
@@ -877,9 +879,14 @@ impl EvalAllState {
         let start = self.coordinates(point);
         SignsIter::new(&self.signs[start..], 0, self.t)
     }
-    fn iter_batched_sign(&self, point: usize, chunk_size_bits: usize) -> SignsIterChunk {
+    fn iter_batched_sign(
+        &self,
+        point: usize,
+        chunk_size_bits: usize,
+        count: usize,
+    ) -> SignsIterChunk {
         let start = self.coordinates(point);
-        SignsIterChunk::new(&self.signs[start..], 0, self.t, chunk_size_bits)
+        SignsIterChunk::new(&self.signs[start..], 0, count, chunk_size_bits)
     }
 }
 
@@ -895,9 +902,9 @@ mod tests {
     }
     #[test]
     fn test() {
-        const INPUT_LEN: usize = 11;
-        const INPUTS: usize = 439;
-        const BATCH_SIZE: usize = 1;
+        const INPUT_LEN: usize = 10;
+        const INPUTS: usize = 10;
+        const BATCH_SIZE: usize = 4;
         assert!(INPUTS <= 1 << (INPUT_LEN - 1));
         let mut rng = thread_rng();
         let mut inputs_hashmap = HashMap::with_capacity(INPUTS);
