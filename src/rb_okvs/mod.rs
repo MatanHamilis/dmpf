@@ -1,10 +1,11 @@
 pub mod binary_okvs;
 use std::{
+    backtrace,
     fmt::Debug,
     hash::Hash,
     iter::Sum,
     marker::PhantomData,
-    ops::{AddAssign, Div, Mul, MulAssign, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, MulAssign, SubAssign},
 };
 
 use aes_prng::AesRng;
@@ -22,6 +23,7 @@ pub trait OkvsValue:
     + Debug
     + Hash
     + AddAssign
+    + Add<Output = Self>
     + SubAssign
     + Div<Output = Self>
     + From<bool>
@@ -58,6 +60,13 @@ impl OkvsU128 {
 /// This type is mainly used for testing.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct OkvsBool(bool);
+impl Add for OkvsBool {
+    type Output = Self;
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.0 ^= rhs.0;
+        self
+    }
+}
 impl OkvsValue for OkvsBool {
     fn is_zero(&self) -> bool {
         !self.0
@@ -130,8 +139,8 @@ struct MatrixRow<const W: usize, V: OkvsValue> {
 }
 
 impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
-    fn from_key_value<K: OkvsKey>(key: &K, value: V, m: usize) -> Self {
-        let (first_col, band) = hash_key(key, m);
+    fn from_key_value<K: OkvsKey>(key: &K, value: V, m: usize, batch_size: usize) -> Self {
+        let (first_col, band) = hash_key(key, m, batch_size);
         let mut output = Self {
             band,
             first_col,
@@ -312,17 +321,18 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
 }
 
 #[derive(Clone)]
-pub struct EncodedOkvs<const W: usize, K: OkvsKey, V: OkvsValue>(Vec<V>, PhantomData<K>);
+pub struct EncodedOkvs<const W: usize, K: OkvsKey, V: OkvsValue>(
+    Vec<V>,
+    PhantomData<K>,
+    Vec<Vec<V>>,
+    usize,
+);
 impl<const W: usize, K: OkvsKey, V: OkvsValue> EncodedOkvs<W, K, V> {
     pub fn decode(&self, key: &K) -> V {
-        let (offset, bits) = hash_key_compressed::<W, K>(key, self.0.len());
-        let slice = &self.0[offset..offset + (W as usize)];
-        bits.zip(slice)
-            .map(|(bit, v)| *v * bit)
-            .fold(V::default(), |mut cur, acc| {
-                cur += acc;
-                cur
-            })
+        let (offset, bits) = hash_key_compressed_batch::<W, K>(key, self.0.len(), self.3);
+        let rounded_offset = offset / self.3;
+        let slice = &self.2[rounded_offset..];
+        bits.zip(slice).map(|(bit, v)| v[bit]).sum()
     }
 }
 impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, V> {
@@ -356,28 +366,73 @@ impl<const W: usize, V: OkvsValue> SubAssign<&MatrixRow<W, V>> for MatrixRow<W, 
 pub fn hash_key_compressed<const W: usize, K: OkvsKey>(
     k: &K,
     m: usize,
+    batch_size: usize,
 ) -> (usize, impl Iterator<Item = bool>) {
     let block = k.hash_seed();
     let mut seed = AesRng::from_seed(block);
     let mut cur_bits = 0;
     let band_start = (seed.next_u64() as usize) % (m - W);
+    let band_start_rounded = (band_start / batch_size) * batch_size;
+    let diff = band_start - band_start_rounded;
     (
         band_start,
-        (0..W).map(move |i| {
-            if (i & 63) == 0 {
-                cur_bits = seed.next_u64();
+        (0..W + diff)
+            .map(move |i| {
+                if (i & 63) == 0 {
+                    cur_bits = seed.next_u64() as usize;
+                }
+                let bit = (cur_bits & 1) == 1;
+                cur_bits >>= 1;
+                bit
+            })
+            .skip(diff),
+    )
+}
+/// We split the functions to avoid generating a large array when `decode`-ing.
+pub fn hash_key_compressed_batch<const W: usize, K: OkvsKey>(
+    k: &K,
+    m: usize,
+    batch_size: usize,
+) -> (usize, impl Iterator<Item = usize>) {
+    let block = k.hash_seed();
+    let mut seed = AesRng::from_seed(block);
+    let mut cur_bits = 0;
+    let band_start = (seed.next_u64() as usize) % (m - W);
+    // the band start is rounded to a multiple of batch_size, extra places will be given zeros.
+    let band_start_rounded = (band_start / batch_size) * batch_size;
+    let diff = band_start - band_start_rounded;
+    let mut to_generate = W + diff;
+    let mut first = true;
+    let mask_iter = (64 / batch_size) - 1;
+    (
+        band_start,
+        (0..(to_generate).div_ceil(batch_size)).map(move |i| {
+            if (i & mask_iter) == 0 {
+                cur_bits = seed.next_u64() as usize;
             }
-            let bit = (cur_bits & 1) == 1;
-            cur_bits >>= 1;
-            bit
+            let to_gen_now = (to_generate).min(batch_size);
+            let mask = (1 << to_gen_now) - 1;
+            let bit = cur_bits & mask;
+            to_generate -= to_gen_now;
+            cur_bits >>= batch_size;
+            if first {
+                first = false;
+                (bit >> diff) << diff
+            } else {
+                bit
+            }
         }),
     )
 }
 
 /// The hash_key function output a row in the sparse matrix.
 /// The row is a band of length 'w' of 0/1 values.
-pub fn hash_key<const W: usize, K: OkvsKey, V: OkvsValue>(k: &K, m: usize) -> (usize, [V; W]) {
-    let (band_start, mut band_iter) = hash_key_compressed::<W, _>(k, m);
+pub fn hash_key<const W: usize, K: OkvsKey, V: OkvsValue>(
+    k: &K,
+    m: usize,
+    batch_size: usize,
+) -> (usize, [V; W]) {
+    let (band_start, mut band_iter) = hash_key_compressed::<W, _>(k, m, batch_size);
     (
         band_start,
         core::array::from_fn(|_| V::from(band_iter.next().unwrap())),
@@ -386,6 +441,7 @@ pub fn hash_key<const W: usize, K: OkvsKey, V: OkvsValue>(k: &K, m: usize) -> (u
 pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
     kvs: &[(K, V)],
     epsilon_percent: EpsilonPercent,
+    batch_size: usize,
 ) -> EncodedOkvs<W, K, V> {
     let epsilon_percent_usize = usize::from(epsilon_percent);
     let m = ((100 + epsilon_percent_usize) * kvs.len())
@@ -393,7 +449,7 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
         .max(W + 1);
     let mut matrix: Vec<_> = kvs
         .iter()
-        .map(|(k, v)| MatrixRow::<W, V>::from_key_value(k, *v, m))
+        .map(|(k, v)| MatrixRow::<W, V>::from_key_value(k, *v, m, batch_size))
         .collect();
     matrix.sort_by_key(|f| f.first_col);
     // Now we start the Gaussian Elimination.
@@ -446,7 +502,7 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
             }
         }
     }
-    let v = output_vector
+    let v: Vec<_> = output_vector
         .into_iter()
         .map(|v| {
             if v.is_none() {
@@ -456,13 +512,35 @@ pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
             }
         })
         .collect();
-    return EncodedOkvs(v, PhantomData);
+
+    let vv = v
+        .chunks(batch_size)
+        .map(|oc| {
+            let mut cur_v = Vec::with_capacity(1 << oc.len());
+            cur_v.push(V::default());
+            for val in oc.iter().copied() {
+                for i in 0..cur_v.len() {
+                    cur_v.push(cur_v[i] + val);
+                }
+            }
+            cur_v
+        })
+        .collect();
+    return EncodedOkvs(v, PhantomData, vv, batch_size);
 }
 
 #[cfg(test)]
 mod tests {
     #[derive(Hash, Debug, PartialEq, Eq, Clone, Copy)]
     pub struct OkvsMod3(u8);
+    impl Add for OkvsMod3 {
+        type Output = Self;
+        fn add(mut self, rhs: Self) -> Self::Output {
+            self.0 += rhs.0;
+            self.0 %= 3;
+            self
+        }
+    }
     impl OkvsValue for OkvsMod3 {
         fn is_zero(&self) -> bool {
             self.0 == 0
@@ -534,9 +612,10 @@ mod tests {
     }
     use std::{
         iter::Sum,
-        ops::{AddAssign, Div, Mul, MulAssign, SubAssign},
+        ops::{Add, AddAssign, Div, Mul, MulAssign, SubAssign},
     };
 
+    use aes::cipher::typenum::type_operators;
     use rand::thread_rng;
 
     use crate::{
@@ -547,8 +626,9 @@ mod tests {
     fn test_okvs<const W: usize, K: OkvsKey, V: OkvsValue>(
         kvs: &[(K, V)],
         epsilon_percent: EpsilonPercent,
+        batch_size: usize,
     ) {
-        let encoded = encode::<W, K, V>(&kvs, epsilon_percent);
+        let encoded = encode::<W, K, V>(&kvs, epsilon_percent, batch_size);
         for (k, v) in kvs {
             assert_eq!(encoded.decode(k), *v)
         }
@@ -562,9 +642,10 @@ mod tests {
     #[test]
     fn test_okvs_small() {
         let kvs = randomize_kvs(300);
-        test_okvs::<576, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Three);
-        test_okvs::<400, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Five);
-        test_okvs::<300, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Seven);
-        test_okvs::<200, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Ten);
+        const BATCH_SIZE: usize = 8;
+        test_okvs::<576, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Three, BATCH_SIZE);
+        test_okvs::<400, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Five, BATCH_SIZE);
+        test_okvs::<300, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Seven, BATCH_SIZE);
+        test_okvs::<200, OkvsU128, PrimeField64x2>(&kvs, EpsilonPercent::Ten, BATCH_SIZE);
     }
 }

@@ -157,12 +157,14 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> DmpfKey<Output>
 
 pub struct OkvsDmpf<const BIN_W: usize, const W: usize, Output: DpfOutput> {
     epsilon_percent: EpsilonPercent,
+    batch_size: usize,
     _phantom: PhantomData<Output>,
 }
 impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, Output> {
-    pub fn new(epsilon_percent: EpsilonPercent) -> Self {
+    pub fn new(epsilon_percent: EpsilonPercent, batch_size: usize) -> Self {
         Self {
             epsilon_percent,
+            batch_size,
             _phantom: PhantomData,
         }
     }
@@ -278,6 +280,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
             &seeds_1,
             &signs_1,
             self.epsilon_percent,
+            self.batch_size,
         ));
         let first_key = OkvsDmpfKey::<BIN_W, W, Output> {
             seed: seed_0,
@@ -329,6 +332,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
         seeds_1: &[Node],
         signs_1: &[bool],
         epsilon_percent: EpsilonPercent,
+        batch_size: usize,
     ) -> EncodedOkvs<W, Node, Output> {
         let v: Vec<_> = (0..kvs.len())
             .map(|k| {
@@ -342,7 +346,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
                 (Node::from(kvs[k].0), cw)
             })
             .collect();
-        crate::rb_okvs::encode(&v, epsilon_percent)
+        crate::rb_okvs::encode(&v, epsilon_percent, batch_size)
     }
     fn gen_cw<R: RngCore + CryptoRng>(
         depth: usize,
@@ -482,7 +486,9 @@ mod test {
         const BIN_W: usize = W.div_ceil(64);
         const POINTS: usize = 30;
         const INPUT_SIZE: usize = 9;
-        let scheme = OkvsDmpf::<BIN_W, W, Node>::new(crate::rb_okvs::EpsilonPercent::Ten);
+        const BATCH_SIZE: usize = 1;
+        let scheme =
+            OkvsDmpf::<BIN_W, W, Node>::new(crate::rb_okvs::EpsilonPercent::Ten, BATCH_SIZE);
         let mut rng = thread_rng();
         let mut input_map = HashMap::with_capacity(POINTS);
         while input_map.len() < POINTS {

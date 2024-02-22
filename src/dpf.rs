@@ -68,7 +68,6 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
         self.dpf_keys.len()
     }
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
-        let time = Instant::now();
         let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
         self.dpf_keys[1..].iter().for_each(|k| {
             f.iter_mut()

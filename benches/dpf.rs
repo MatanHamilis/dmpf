@@ -8,7 +8,7 @@ use dmpf::{
 };
 use rand::{thread_rng, RngCore};
 
-const INPUT_LENS: (usize, usize) = (5, 30);
+const INPUT_LENS: [usize; 9] = [6, 8, 10, 12, 14, 16, 18, 20, 22];
 const POINTS: [usize; 4] = [10, 5 * 5, 14 * 14, 66 * 66];
 
 fn make_inputs<F: DpfOutput>(input_len: usize, total_inputs: usize) -> Vec<(u128, F)> {
@@ -101,9 +101,17 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
 
 fn bench_dpf_dmpf(c: &mut Criterion) {
     let dpf = DpfDmpf::new();
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    for input_len in INPUT_LENS {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "dpf_dmpf", &dpf, input_len, points);
+        }
+    }
+}
+fn bench_dpf_dmpf_node(c: &mut Criterion) {
+    let dpf = DpfDmpf::new();
+    for input_len in INPUT_LENS {
+        for points in POINTS {
+            bench_dmpf::<Node, _>(c, "dpf_dmpf_node", &dpf, input_len, points);
         }
     }
 }
@@ -124,55 +132,70 @@ fn match_logn(points: usize) -> Option<LogN> {
         return None;
     })
 }
-fn bench_okvs_dmpf(c: &mut Criterion) {
+fn do_bench_okvs_dmpf<O: DpfOutput>(c: &mut Criterion, name: &str) {
     const LAMBDA: usize = 40;
+    const BATCH_SIZE: usize = 8;
     let eps = EpsilonPercent::Fifty;
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    for input_len in INPUT_LENS {
         for points in POINTS {
             let w = g(LAMBDA, eps, match_logn(points).unwrap());
             match w {
                 16 => {
-                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 18 => {
-                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 33 => {
-                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 36 => {
-                    let dpf = OkvsDmpf::<1, 40, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 168 => {
-                    let dpf = OkvsDmpf::<3, 168, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<3, 168, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 183 => {
-                    let dpf = OkvsDmpf::<3, 183, PrimeField64x2>::new(eps);
-                    bench_dmpf(c, "okvs", &dpf, input_len, points);
+                    let dpf = OkvsDmpf::<3, 183, O>::new(eps, BATCH_SIZE);
+                    bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 _ => panic!("w missing: {}", w),
             }
         }
     }
 }
+fn bench_okvs_dmpf(c: &mut Criterion) {
+    do_bench_okvs_dmpf::<PrimeField64x2>(c, "okvs");
+}
+fn bench_okvs_dmpf_node(c: &mut Criterion) {
+    do_bench_okvs_dmpf::<Node>(c, "okvs_node");
+}
 
 fn bench_batch_code_dmpf(c: &mut Criterion) {
     let dpf = BatchCodeDmpf::<PrimeField64x2>::new();
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    for input_len in INPUT_LENS {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "batch_code", &dpf, input_len, points);
+        }
+    }
+}
+fn bench_batch_code_dmpf_node(c: &mut Criterion) {
+    let dpf = BatchCodeDmpf::<Node>::new();
+    for input_len in INPUT_LENS {
+        for points in POINTS {
+            bench_dmpf::<Node, _>(c, "batch_code_node", &dpf, input_len, points);
         }
     }
 }
 
 fn bench_dpf_single(c: &mut Criterion) {
     let mut rng = thread_rng();
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    for input_len in INPUT_LENS {
         let roots = (Node::random(&mut rng), Node::random(&mut rng));
         let alpha = ((rng.next_u64() % (1 << input_len)) as u128) << (128 - input_len);
         let beta = PrimeField64x2::random(&mut rng);
@@ -214,8 +237,8 @@ fn bench_dpf_single(c: &mut Criterion) {
 }
 
 fn bench_big_state_dmpf(c: &mut Criterion) {
-    let dpf = BigStateDmpf::new(4);
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    let dpf = BigStateDmpf::new(8);
+    for input_len in INPUT_LENS {
         for points in POINTS {
             bench_dmpf::<PrimeField64x2, _>(c, "big_state", &dpf, input_len, points);
         }
@@ -223,8 +246,8 @@ fn bench_big_state_dmpf(c: &mut Criterion) {
 }
 
 fn bench_big_state_dmpf_node(c: &mut Criterion) {
-    let dpf = BigStateDmpf::new(4);
-    for input_len in INPUT_LENS.0..=INPUT_LENS.1 {
+    let dpf = BigStateDmpf::new(8);
+    for input_len in INPUT_LENS {
         for points in POINTS {
             bench_dmpf::<Node, _>(c, "big_state_node", &dpf, input_len, points);
         }
@@ -235,9 +258,12 @@ criterion_group!(
     config = Criterion::default().configure_from_args();
     targets = bench_dpf_single,
     bench_dpf_dmpf,
+    bench_dpf_dmpf_node,
     bench_big_state_dmpf,
     bench_big_state_dmpf_node,
     bench_batch_code_dmpf,
+    bench_batch_code_dmpf_node,
     bench_okvs_dmpf,
+    bench_okvs_dmpf_node
 );
 criterion_main!(benches);
