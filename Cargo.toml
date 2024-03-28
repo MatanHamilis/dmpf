@@ -42,6 +42,10 @@ harness = false
 name = "batch_code"
 harness = false
 
+[[bench]]
+name = "prg"
+harness = false
+
 
 
 [build]

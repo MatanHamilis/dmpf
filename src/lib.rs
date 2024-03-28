@@ -8,13 +8,13 @@ use std::ops::Sub;
 pub mod big_state;
 mod dpf;
 pub mod field;
-mod prg;
+pub mod prg;
 mod trie;
 mod utils;
 pub use dpf::int_to_bits;
 pub mod batch_code;
 pub mod okvs;
-mod rb_okvs;
+pub mod rb_okvs;
 
 pub use dpf::DpfKey;
 use rand::CryptoRng;

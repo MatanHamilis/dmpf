@@ -205,12 +205,12 @@ impl HashFunctionIndex {
         }
         panic!("Too many mappings");
     }
-    fn eval(&self, from: usize, function_idx: usize) -> (usize, usize) {
+    pub fn eval(&self, from: usize, function_idx: usize) -> (usize, usize) {
         debug_assert!(function_idx < self.hash_functions_count);
         let v = self.contents[self.hash_functions_count * from + function_idx];
         (v / self.bucket_size, v % self.bucket_size)
     }
-    fn eval_all(&self, from: usize) -> impl '_ + Iterator<Item = (usize, usize)> {
+    pub fn eval_all(&self, from: usize) -> impl '_ + Iterator<Item = (usize, usize)> {
         let v = &self.contents
             [self.hash_functions_count * from..self.hash_functions_count * (from + 1)];
         v.iter()

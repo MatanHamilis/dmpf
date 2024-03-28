@@ -503,7 +503,6 @@ impl SignsCW {
 #[derive(Debug, Clone)]
 pub struct PrecomputedSignsCW {
     v: Vec<Vec<Node>>,
-    batch_size: usize,
     t: usize,
     nodes_per_direction: usize,
     nodes_per_entry: usize,
@@ -536,7 +535,6 @@ impl PrecomputedSignsCW {
             .collect();
         Self {
             v,
-            batch_size,
             t,
             nodes_per_direction,
             nodes_per_entry,

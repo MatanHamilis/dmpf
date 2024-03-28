@@ -138,9 +138,11 @@ fn bench_ole_pcg(c: &mut Criterion) {
     bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Dpf", c);
     const W: usize = 200;
     const BIN_W: usize = W.div_ceil(64);
-    let dpf = OkvsDmpf::<BIN_W, W, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+    const PRECOMPUTE_BATCH_SIZE: usize = 8;
+    let dpf =
+        OkvsDmpf::<BIN_W, W, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten, PRECOMPUTE_BATCH_SIZE);
     bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "Okvs", c);
-    let dpf = BigStateDmpf::new();
+    let dpf = BigStateDmpf::new(PRECOMPUTE_BATCH_SIZE);
     bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BigState", c);
     let dpf = BatchCodeDmpf::new();
     bench_ole_pcg_with_dmpf::<2, PrimeField64, PrimeField64x2, _>(&dpf, "BatchCode", c);

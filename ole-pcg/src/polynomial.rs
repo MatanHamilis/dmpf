@@ -456,7 +456,8 @@ mod tests {
         let mut rng = thread_rng();
         const W: usize = 100;
         const BIN_W: usize = W.div_ceil(64);
-        let dmpf = OkvsDmpf::<BIN_W, W, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten);
+        const BATCH_SIZE: usize = 8;
+        let dmpf = OkvsDmpf::<BIN_W, W, PrimeField64x2>::new(dmpf::EpsilonPercent::Ten, BATCH_SIZE);
         // for _ in 0..TESTS {
         let mut seed = [0u8; 16];
         rng.fill_bytes(&mut seed);

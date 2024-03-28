@@ -429,6 +429,7 @@ mod tests {
     fn test_multiplicative_sharing() {
         const LOG_DEGREE: usize = 10;
         const WEIGHT: usize = 20;
+        const BATCH_SIZE: usize = 8;
         let mut rng = thread_rng();
         let modulo = TwoPowerDegreeCyclotomicPolynomial::<PrimeField64>::new(LOG_DEGREE);
 
@@ -440,7 +441,7 @@ mod tests {
 
         const W: usize = 200;
         const BIN_W: usize = W.div_ceil(64);
-        let dmpf = OkvsDmpf::new(EpsilonPercent::Ten);
+        let dmpf = OkvsDmpf::new(EpsilonPercent::Ten, BATCH_SIZE);
         let (share_a, share_b) = share_polynomial::<2, _, PrimeField64x2, _>(
             &sparse_ab,
             WEIGHT * WEIGHT,
