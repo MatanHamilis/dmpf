@@ -46,6 +46,10 @@ harness = false
 name = "prg"
 harness = false
 
+[[bench]]
+name = "okvs"
+harness = false
+
 
 
 [build]
