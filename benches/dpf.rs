@@ -140,19 +140,7 @@ fn do_bench_okvs_dmpf<O: DpfOutput>(c: &mut Criterion, name: &str) {
         for points in POINTS {
             let w = g(LAMBDA, eps, match_logn(points).unwrap());
             match w {
-                16 => {
-                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
-                    bench_dmpf(c, name, &dpf, input_len, points);
-                }
-                18 => {
-                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
-                    bench_dmpf(c, name, &dpf, input_len, points);
-                }
-                33 => {
-                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
-                    bench_dmpf(c, name, &dpf, input_len, points);
-                }
-                36 => {
+                40 => {
                     let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
                     bench_dmpf(c, name, &dpf, input_len, points);
                 }
@@ -198,7 +186,8 @@ fn bench_dpf_single(c: &mut Criterion) {
     for input_len in INPUT_LENS {
         let roots = (Node::random(&mut rng), Node::random(&mut rng));
         let alpha = ((rng.next_u64() % (1 << input_len)) as u128) << (128 - input_len);
-        let beta = PrimeField64x2::random(&mut rng);
+        // let beta = PrimeField64x2::random(&mut rng);
+        let beta = Node::random(&mut rng);
         c.bench_with_input(
             criterion::BenchmarkId::new(
                 format!("Dpf/KeyGen"),
@@ -217,7 +206,7 @@ fn bench_dpf_single(c: &mut Criterion) {
             &input_len,
             |b, input_len| {
                 let (k_0, _) = DpfKey::gen(&roots, &alpha, *input_len, &beta);
-                let mut output = PrimeField64x2::default();
+                let mut output = Node::default();
                 let x = ((rng.next_u64() % (1 << input_len)) as u128) << (128 - input_len);
                 b.iter(|| k_0.eval(&x, &mut output));
             },

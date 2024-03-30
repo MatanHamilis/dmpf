@@ -17,10 +17,12 @@ fn generate_kv<K: OkvsKey, V: OkvsValue, R: RngCore + CryptoRng>(mut rng: R) -> 
 fn do_bench_encode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usize) {
     let kvs = generate_kvs::<K, V>(1 << 24);
     for epsilon_percent in [
-        EpsilonPercent::Three,
+        // EpsilonPercent::Three,
         EpsilonPercent::Five,
         EpsilonPercent::Seven,
         EpsilonPercent::Ten,
+        EpsilonPercent::Fifty,
+        EpsilonPercent::Hundred,
     ] {
         let mut group = c.benchmark_group(format!("epsilon:{}", usize::from(epsilon_percent)));
         for input_log in [
@@ -116,6 +118,8 @@ fn do_bench_decode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usiz
     let kvs = generate_kvs::<K, V>(1 << 24);
     let first_key = &kvs[0].0;
     for epsilon_percent in [
+        EpsilonPercent::Fifty,
+        EpsilonPercent::Hundred,
         EpsilonPercent::Three,
         EpsilonPercent::Five,
         EpsilonPercent::Seven,
@@ -134,43 +138,103 @@ fn do_bench_decode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usiz
             let w = g(LAMBDA, epsilon_percent, input_log);
             // We know W will range between 4 and 9.
             match w {
-                540 => {
-                    let c = rb_okvs::encode::<540, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
+                40 => {
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<40, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                41 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<41, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                43 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<43, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                540 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<540, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }
                 554 => {
-                    let c = rb_okvs::encode::<554, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<554, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }
                 570 => {
-                    let c = rb_okvs::encode::<570, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<570, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                592 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<592, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                612 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<612, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
+                662 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<662, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }
                 6 => {
-                    let c = rb_okvs::encode::<6, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<6, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }
@@ -185,22 +249,22 @@ fn do_bench_decode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usiz
                     });
                 }
                 8 => {
-                    let c = rb_okvs::encode::<8, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<8, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }
                 9 => {
-                    let c = rb_okvs::encode::<9, _, _>(
-                        &kvs[..1 << input_log_usize],
-                        epsilon_percent,
-                        batch_size,
-                    );
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<9, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
                         b.iter(|| c.decode(first_key));
                     });
                 }

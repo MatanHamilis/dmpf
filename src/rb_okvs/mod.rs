@@ -317,7 +317,12 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
     ];
     let (a, b) = a_b_tables[epsilon_percent as usize][log_n as usize];
     // ((100_000 * lambda + 100 * b) / a).div_ceil(64)
-    (100_000 * lambda + 100 * b) / a
+    let t = (100_000 * lambda + 100 * b) / a;
+    if t > lambda {
+        t
+    } else {
+        lambda
+    }
 }
 
 #[derive(Clone)]

@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use super::BITS_OF_SECURITY;
@@ -70,11 +71,9 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
         self.dpf_keys[1..].iter().for_each(|k| {
-            f.iter_mut()
-                .zip(k.eval_all().into_iter())
-                .for_each(|(o, i)| {
-                    *o += i;
-                })
+            f.iter_mut().zip(k.eval_all_into()).for_each(|(o, i)| {
+                *o += i;
+            })
         });
         f
     }
@@ -212,54 +211,69 @@ impl<Output: DpfOutput> DpfKey<Output> {
             *output = output.neg()
         }
     }
-    pub fn eval_all(&self) -> Vec<Output> {
-        let mut cur_seeds = vec![self.root];
-        let mut cur_signs = vec![self.root_bit];
+    pub fn eval_all_into(&self) -> impl Iterator<Item = Output> {
+        const CHUNK_SIZE: usize = 16;
+        let mut cur_seeds = Vec::with_capacity(1 << self.input_bits);
+        let mut next_seeds = Vec::with_capacity(1 << self.input_bits);
+        unsafe { cur_seeds.set_len(1 << self.input_bits) };
+        unsafe { next_seeds.set_len(1 << self.input_bits) };
+        cur_seeds[0] = self.root;
+        let mut cur_signs = Vec::with_capacity(1 << self.input_bits);
+        let mut next_signs = Vec::with_capacity(1 << self.input_bits);
+        unsafe { cur_signs.set_len(1 << self.input_bits) };
+        unsafe { next_signs.set_len(1 << self.input_bits) };
+        cur_signs[0] = self.root_bit;
         for depth in 0..self.input_bits {
-            let mut next_seeds = Vec::with_capacity(1 << (depth + 1));
-            unsafe { next_seeds.set_len(1 << (depth + 1)) };
-            let mut next_signs = Vec::with_capacity(1 << (depth + 1));
-            unsafe { next_signs.set_len(1 << (depth + 1)) };
-            double_prg_many(&cur_seeds, &DOUBLE_PRG_CHILDREN, &mut next_seeds);
             let mut cur_cw = self.cws[depth].node;
             let (cw_t_l, cw_t_r) = cur_cw.pop_first_two_bits();
-            next_seeds
-                .chunks_exact_mut(2)
-                .zip(next_signs.chunks_exact_mut(2))
-                .zip(cur_signs.iter().copied())
-                .for_each(|((seeds, signs), cur_sign)| {
-                    let mut seed_l = seeds[0];
-                    let mut seed_r = seeds[1];
-                    let (mut t_l, _) = seed_l.pop_first_two_bits();
-                    let (mut t_r, _) = seed_r.pop_first_two_bits();
-                    if cur_sign {
-                        seed_l ^= &cur_cw;
-                        seed_r ^= &cur_cw;
-                        t_l ^= cw_t_l;
-                        t_r ^= cw_t_r;
+            // double_prg_many(
+            //     &cur_seeds[..1 << depth],
+            //     &DOUBLE_PRG_CHILDREN,
+            //     &mut next_seeds[..2 << depth],
+            // );
+            let mut tmp_out: [Node; CHUNK_SIZE * 2] = [Node::default(); CHUNK_SIZE * 2];
+            next_seeds[..2 << depth]
+                .chunks_mut(2 * CHUNK_SIZE)
+                .zip(next_signs[..2 << depth].chunks_mut(2 * CHUNK_SIZE))
+                .zip(cur_signs[..1 << depth].chunks(CHUNK_SIZE))
+                .zip(cur_seeds[..1 << depth].chunks(CHUNK_SIZE))
+                .for_each(|(((seeds, signs), cur_signs), cur_seeds)| {
+                    double_prg_many(cur_seeds, &DOUBLE_PRG_CHILDREN, &mut tmp_out);
+                    for i in 0..cur_signs.len() {
+                        let mut seed_l = tmp_out[2 * i];
+                        let mut seed_r = tmp_out[2 * i + 1];
+                        let (mut t_l, _) = seed_l.pop_first_two_bits();
+                        let (mut t_r, _) = seed_r.pop_first_two_bits();
+                        if cur_signs[i] {
+                            seed_l ^= &cur_cw;
+                            seed_r ^= &cur_cw;
+                            t_l ^= cw_t_l;
+                            t_r ^= cw_t_r;
+                        }
+                        seeds[2 * i] = seed_l;
+                        seeds[2 * i + 1] = seed_r;
+                        signs[2 * i] = t_l;
+                        signs[2 * i + 1] = t_r;
                     }
-                    seeds[0] = seed_l;
-                    seeds[1] = seed_r;
-                    signs[0] = t_l;
-                    signs[1] = t_r;
                 });
-            cur_seeds = next_seeds;
-            cur_signs = next_signs;
+            (cur_seeds, next_seeds) = (next_seeds, cur_seeds);
+            (cur_signs, next_signs) = (next_signs, cur_signs);
         }
         let last_cw = self.last_cw;
-        cur_seeds
-            .into_iter()
-            .zip(cur_signs.into_iter())
-            .map(|(s, t)| {
-                let my_last_cw = Output::from(s);
-                let o = if t { my_last_cw + last_cw } else { my_last_cw };
-                if self.root_bit {
-                    o.neg()
-                } else {
-                    o
-                }
-            })
-            .collect()
+        let root_bit = self.root_bit;
+        let output = cur_seeds.into_iter().zip(cur_signs).map(move |(s, t)| {
+            let my_last_cw = Output::from(s);
+            let o = if t { my_last_cw + last_cw } else { my_last_cw };
+            if root_bit {
+                o.neg()
+            } else {
+                o
+            }
+        });
+        output
+    }
+    pub fn eval_all(&self) -> Vec<Output> {
+        self.eval_all_into().collect()
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {
