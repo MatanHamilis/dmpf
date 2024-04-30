@@ -133,15 +133,16 @@ fn match_logn(points: usize) -> Option<LogN> {
     })
 }
 fn do_bench_okvs_dmpf<O: DpfOutput>(c: &mut Criterion, name: &str) {
-    const LAMBDA: usize = 40;
-    const BATCH_SIZE: usize = 8;
-    let eps = EpsilonPercent::Fifty;
+    // const LAMBDA: usize = 6;
+    const BATCH_SIZE: usize = 1;
+    let eps = EpsilonPercent::Hundred;
     for input_len in INPUT_LENS {
         for points in POINTS {
-            let w = g(LAMBDA, eps, match_logn(points).unwrap());
+            // let w = g(LAMBDA, eps, match_logn(points).unwrap());
+            let w = 12;
             match w {
-                40 => {
-                    let dpf = OkvsDmpf::<1, 40, O>::new(eps, BATCH_SIZE);
+                12 => {
+                    let dpf = OkvsDmpf::<1, 12, O>::new(eps, BATCH_SIZE);
                     bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 168 => {

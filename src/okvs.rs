@@ -49,7 +49,7 @@ impl<const W: usize, Output: BinaryOkvsValue> BinaryOkvs<W, Output> {
 pub struct OkvsDmpfKey<const BIN_W: usize, const W: usize, Output: DpfOutput> {
     seed: Node,
     sign: bool,
-    cws: Vec<BinaryOkvs<BIN_W, Node>>,
+    cws: Vec<Okvs<W, Node>>,
     last_cw: Okvs<W, Output>,
     point_count: usize,
     _p: PhantomData<Output>,
@@ -222,6 +222,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
                 &seeds_1,
                 &signs_1,
                 self.epsilon_percent,
+                self.batch_size,
                 rng,
             );
             let mut trie_iter = trie.iter_at_depth(depth);
@@ -312,7 +313,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
         });
         output
     }
-    fn correct(v: Node, sign: bool, cw: &BinaryOkvs<BIN_W, Node>) -> Node {
+    fn correct(v: Node, sign: bool, cw: &Okvs<W, Node>) -> Node {
         if !sign {
             return Node::default();
         }
@@ -356,8 +357,9 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
         seed_1: &[Node],
         sign_1: &[bool],
         epsilon_percent: EpsilonPercent,
+        batch_size: usize,
         rng: &mut R,
-    ) -> BinaryOkvs<BIN_W, Node> {
+    ) -> Okvs<W, Node> {
         if depth >= BITS_OF_SECURITY {
             unimplemented!();
         }
@@ -439,7 +441,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
         };
         // In this case we go for information theoretic OKVS
         if points_trie.len() >= (1 << depth) {
-            BinaryOkvs::InformationTheoretic(InformationTheoreticOkvs::encode(
+            Okvs::InformationTheoretic(InformationTheoreticOkvs::encode(
                 depth,
                 new_v.into_iter().map(|v| v.1.into()).collect(),
             ))
@@ -448,9 +450,10 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
                 .into_iter()
                 .map(|(a, b)| (a.into(), b.into()))
                 .collect();
-            BinaryOkvs::RbOkvs(crate::rb_okvs::binary_okvs::encode::<BIN_W, _, _>(
+            Okvs::RbOkvs(crate::rb_okvs::encode::<W, _, _>(
                 &v,
                 epsilon_percent,
+                batch_size,
             ))
         }
     }

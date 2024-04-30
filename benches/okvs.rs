@@ -135,9 +135,20 @@ fn do_bench_decode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usiz
             LogN::TwentyFour,
         ] {
             let input_log_usize = usize::from(input_log);
-            let w = g(LAMBDA, epsilon_percent, input_log);
+            // let w = g(LAMBDA, epsilon_percent, input_log);
+            let w = 6;
             // We know W will range between 4 and 9.
             match w {
+                6 => {
+                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                        let c = rb_okvs::encode::<6, _, _>(
+                            &kvs[..1 << input_log_usize],
+                            epsilon_percent,
+                            batch_size,
+                        );
+                        b.iter(|| c.decode(first_key));
+                    });
+                }
                 40 => {
                     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
                         let c = rb_okvs::encode::<40, _, _>(

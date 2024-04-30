@@ -13,6 +13,7 @@ mod trie;
 mod utils;
 pub use dpf::int_to_bits;
 pub mod batch_code;
+// pub mod expand_okvs;
 pub mod okvs;
 pub mod rb_okvs;
 

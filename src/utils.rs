@@ -51,8 +51,9 @@ impl Sub for Node {
     }
 }
 impl OkvsKey for Node {
-    fn hash_seed(&self) -> [u8; 16] {
-        self.0.to_be_bytes()
+    fn hash_seed(&self, base_seed: &[u8; 16]) -> [u8; 16] {
+        let my_bytes = self.0.to_le_bytes();
+        core::array::from_fn(|i| my_bytes[i] ^ base_seed[i])
     }
     fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
         Self::random(rng)

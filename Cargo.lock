@@ -247,6 +247,7 @@ dependencies = [
  "criterion",
  "once_cell",
  "rand",
+ "rand_chacha",
 ]
 
 [[package]]

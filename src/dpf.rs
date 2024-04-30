@@ -212,7 +212,6 @@ impl<Output: DpfOutput> DpfKey<Output> {
         }
     }
     pub fn eval_all_into(&self) -> impl Iterator<Item = Output> {
-        const CHUNK_SIZE: usize = 16;
         let mut cur_seeds = Vec::with_capacity(1 << self.input_bits);
         let mut next_seeds = Vec::with_capacity(1 << self.input_bits);
         unsafe { cur_seeds.set_len(1 << self.input_bits) };
@@ -224,37 +223,32 @@ impl<Output: DpfOutput> DpfKey<Output> {
         unsafe { next_signs.set_len(1 << self.input_bits) };
         cur_signs[0] = self.root_bit;
         for depth in 0..self.input_bits {
+            double_prg_many(
+                &cur_seeds[..1 << depth],
+                &DOUBLE_PRG_CHILDREN,
+                &mut next_seeds[..2 << depth],
+            );
             let mut cur_cw = self.cws[depth].node;
             let (cw_t_l, cw_t_r) = cur_cw.pop_first_two_bits();
-            // double_prg_many(
-            //     &cur_seeds[..1 << depth],
-            //     &DOUBLE_PRG_CHILDREN,
-            //     &mut next_seeds[..2 << depth],
-            // );
-            let mut tmp_out: [Node; CHUNK_SIZE * 2] = [Node::default(); CHUNK_SIZE * 2];
             next_seeds[..2 << depth]
-                .chunks_mut(2 * CHUNK_SIZE)
-                .zip(next_signs[..2 << depth].chunks_mut(2 * CHUNK_SIZE))
-                .zip(cur_signs[..1 << depth].chunks(CHUNK_SIZE))
-                .zip(cur_seeds[..1 << depth].chunks(CHUNK_SIZE))
-                .for_each(|(((seeds, signs), cur_signs), cur_seeds)| {
-                    double_prg_many(cur_seeds, &DOUBLE_PRG_CHILDREN, &mut tmp_out);
-                    for i in 0..cur_signs.len() {
-                        let mut seed_l = tmp_out[2 * i];
-                        let mut seed_r = tmp_out[2 * i + 1];
-                        let (mut t_l, _) = seed_l.pop_first_two_bits();
-                        let (mut t_r, _) = seed_r.pop_first_two_bits();
-                        if cur_signs[i] {
-                            seed_l ^= &cur_cw;
-                            seed_r ^= &cur_cw;
-                            t_l ^= cw_t_l;
-                            t_r ^= cw_t_r;
-                        }
-                        seeds[2 * i] = seed_l;
-                        seeds[2 * i + 1] = seed_r;
-                        signs[2 * i] = t_l;
-                        signs[2 * i + 1] = t_r;
+                .chunks_exact_mut(2)
+                .zip(next_signs[..2 << depth].chunks_exact_mut(2))
+                .zip(cur_signs[..1 << depth].iter().copied())
+                .for_each(|((seeds, signs), cur_sign)| {
+                    let mut seed_l = seeds[0];
+                    let mut seed_r = seeds[1];
+                    let (mut t_l, _) = seed_l.pop_first_two_bits();
+                    let (mut t_r, _) = seed_r.pop_first_two_bits();
+                    if cur_sign {
+                        seed_l ^= &cur_cw;
+                        seed_r ^= &cur_cw;
+                        t_l ^= cw_t_l;
+                        t_r ^= cw_t_r;
                     }
+                    seeds[0] = seed_l;
+                    seeds[1] = seed_r;
+                    signs[0] = t_l;
+                    signs[1] = t_r;
                 });
             (cur_seeds, next_seeds) = (next_seeds, cur_seeds);
             (cur_signs, next_signs) = (next_signs, cur_signs);

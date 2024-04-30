@@ -7,7 +7,7 @@ use std::{
 };
 
 use aes_prng::AesRng;
-use rand::{CryptoRng, RngCore, SeedableRng};
+use rand::{thread_rng, CryptoRng, RngCore, SeedableRng};
 
 use crate::{random_u128, EpsilonPercent, LogN};
 
@@ -82,8 +82,8 @@ struct BinaryMatrixRow<const W: usize, V: BinaryOkvsValue> {
 }
 
 impl<const W: usize, V: BinaryOkvsValue> BinaryMatrixRow<W, V> {
-    fn from_key_value<K: OkvsKey>(key: &K, value: V, m: usize) -> Self {
-        let (first_col, band) = hash_key(key, m);
+    fn from_key_value<K: OkvsKey>(key: &K, value: V, m: usize, base_seed: &[u8; 16]) -> Self {
+        let (first_col, band) = hash_key(key, m, base_seed);
         let mut output = Self {
             band,
             first_col,
@@ -126,10 +126,11 @@ pub const fn g(lambda: usize, epsilon_percent: EpsilonPercent, log_n: LogN) -> u
 pub struct BinaryEncodedOkvs<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
     Vec<V>,
     PhantomData<K>,
+    [u8; 16],
 );
 impl<const W: usize, K: OkvsKey, V: BinaryOkvsValue> BinaryEncodedOkvs<W, K, V> {
     pub fn decode(&self, key: &K) -> V {
-        let (offset, bits) = hash_key_compressed::<W, K>(key, self.0.len());
+        let (offset, bits) = hash_key_compressed::<W, K>(key, self.0.len(), &self.2);
         let slice = &self.0[offset..offset + (W * 64 as usize)];
         bits.zip(slice)
             .map(|(bit, v)| *v * bit)
@@ -156,8 +157,9 @@ impl<const W: usize, V: BinaryOkvsValue> SubAssign<&BinaryMatrixRow<W, V>>
 pub fn hash_key_compressed<const W: usize, K: OkvsKey>(
     k: &K,
     m: usize,
+    base_seed: &[u8; 16],
 ) -> (usize, impl Iterator<Item = bool>) {
-    let block = k.hash_seed();
+    let block = k.hash_seed(base_seed);
     let mut seed = AesRng::from_seed(block);
     let mut cur_bits = 0;
     let band_start = (seed.next_u64() as usize) % (m - 64 * W);
@@ -176,8 +178,12 @@ pub fn hash_key_compressed<const W: usize, K: OkvsKey>(
 
 /// The hash_key function output a row in the sparse matrix.
 /// The row is a band of length 'w' of 0/1 values.
-pub fn hash_key<const W: usize, K: OkvsKey>(k: &K, m: usize) -> (usize, [u64; W]) {
-    let (band_start, mut band_iter) = hash_key_compressed::<W, _>(k, m);
+pub fn hash_key<const W: usize, K: OkvsKey>(
+    k: &K,
+    m: usize,
+    base_seed: &[u8; 16],
+) -> (usize, [u64; W]) {
+    let (band_start, mut band_iter) = hash_key_compressed::<W, _>(k, m, base_seed);
     let mut output = [0u64; W];
     for (idx, b) in band_iter.enumerate() {
         if !b {
@@ -193,13 +199,15 @@ pub fn encode<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
     kvs: &[(K, V)],
     epsilon_percent: EpsilonPercent,
 ) -> BinaryEncodedOkvs<W, K, V> {
+    let mut base_seed = [0u8; 16];
+    thread_rng().fill_bytes(&mut base_seed);
     let epsilon_percent_usize = usize::from(epsilon_percent);
     let m = ((100 + epsilon_percent_usize) * kvs.len())
         .div_ceil(100)
         .max(W * 64 + 1);
     let mut matrix: Vec<_> = kvs
         .iter()
-        .map(|(k, v)| BinaryMatrixRow::<W, V>::from_key_value(k, *v, m))
+        .map(|(k, v)| BinaryMatrixRow::<W, V>::from_key_value(k, *v, m, &base_seed))
         .collect();
     matrix.sort_by_key(|f| f.first_col);
     // Now we start the Gaussian Elimination.
@@ -260,7 +268,7 @@ pub fn encode<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
             }
         })
         .collect();
-    return BinaryEncodedOkvs(v, PhantomData);
+    return BinaryEncodedOkvs(v, PhantomData, base_seed);
 }
 
 #[cfg(test)]
