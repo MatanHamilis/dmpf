@@ -295,16 +295,27 @@ impl<Output: DpfOutput> DpfKey<Output> {
         }
         let last_cw = self.last_cw;
         let root_bit = self.root_bit;
+        if root_bit {
+            cur_seeds
+                .iter()
+                .zip(cur_signs.iter())
+                .zip(output.iter_mut())
+                .for_each(move |((s, t), o)| {
+                    let my_last_cw = Output::from(*s);
+                    *o += if *t {
+                        (my_last_cw + last_cw).neg()
+                    } else {
+                        (my_last_cw).neg()
+                    };
+                });
+        }
         cur_seeds
             .iter()
             .zip(cur_signs.iter())
             .zip(output.iter_mut())
             .for_each(move |((s, t), o)| {
                 let my_last_cw = Output::from(*s);
-                *o = if *t { my_last_cw + last_cw } else { my_last_cw };
-                if root_bit {
-                    *o = o.neg();
-                }
+                *o += if *t { my_last_cw + last_cw } else { my_last_cw };
             });
     }
     pub fn eval_all(&self) -> Vec<Output> {
