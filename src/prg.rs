@@ -1,4 +1,9 @@
-use crate::{utils::Node, xor_arrays, BYTES_OF_SECURITY};
+use std::{mem::MaybeUninit, simd::u64x8};
+
+use crate::{
+    utils::{Node, Node512},
+    xor_arrays, BYTES_OF_SECURITY,
+};
 use aes::{
     cipher::{BlockEncrypt, KeyInit},
     Aes128, Block,
@@ -62,6 +67,22 @@ pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) 
                 o_u8[2 * idx + 1][0] ^= children[1];
             }
         });
+}
+pub fn four_way_prg(input: &Node) -> Node512 {
+    let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 4];
+    // let output = unsafe { u64x8::from_array([MaybeUninit::uninit().assume_init(); 8]) };
+    blocks[1][0] ^= 1;
+    blocks[2][0] ^= 2;
+    blocks[3][0] ^= 2;
+    AES.encrypt_blocks(&mut blocks);
+    xor_arrays(&mut blocks[0].into(), input.as_ref());
+    xor_arrays(&mut blocks[1].into(), input.as_ref());
+    xor_arrays(&mut blocks[2].into(), input.as_ref());
+    xor_arrays(&mut blocks[3].into(), input.as_ref());
+    blocks[1][0] ^= 1;
+    blocks[2][0] ^= 2;
+    blocks[3][0] ^= 3;
+    Node512::from(unsafe { std::mem::transmute::<_, u64x8>(blocks) })
 }
 pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
     let mut blocks = [Block::from(*<Node as AsRef<[u8; 16]>>::as_ref(input)); 3];

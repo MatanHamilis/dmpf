@@ -1,3 +1,4 @@
+#![feature(portable_simd)]
 use std::iter::Sum;
 use std::ops::Add;
 use std::ops::AddAssign;

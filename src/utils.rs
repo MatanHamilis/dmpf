@@ -1,13 +1,15 @@
 use std::{
     cmp::Ordering,
     iter::Sum,
+    mem::MaybeUninit,
     ops::{
         Add, AddAssign, BitXor, BitXorAssign, Div, Index, IndexMut, Mul, MulAssign, Neg, Sub,
         SubAssign,
     },
+    simd::{num::SimdUint, u64x8},
 };
 
-use crate::{field::FieldElement, rb_okvs::binary_okvs::BinaryOkvsValue};
+use crate::{field::FieldElement, prg::four_way_prg, rb_okvs::binary_okvs::BinaryOkvsValue};
 use crate::{
     rb_okvs::{OkvsKey, OkvsValue},
     DpfOutput,
@@ -29,6 +31,108 @@ impl BinaryOkvsValue for Node {
     }
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+}
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+pub struct Node512(u64x8);
+impl DpfOutput for Node512 {}
+impl AddAssign for Node512 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 ^= rhs.0;
+    }
+}
+impl From<u64x8> for Node512 {
+    fn from(value: u64x8) -> Self {
+        Self(value)
+    }
+}
+impl From<Node> for Node512 {
+    fn from(value: Node) -> Self {
+        four_way_prg(&value)
+    }
+}
+impl Neg for Node512 {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self
+    }
+}
+impl MulAssign for Node512 {
+    fn mul_assign(&mut self, rhs: Self) {
+        self.0 *= rhs.0;
+    }
+}
+impl Mul for Node512 {
+    type Output = Self;
+    fn mul(mut self, rhs: Self) -> Self::Output {
+        self *= rhs;
+        self
+    }
+}
+impl Mul<bool> for Node512 {
+    type Output = Self;
+    fn mul(self, rhs: bool) -> Self::Output {
+        if rhs {
+            self
+        } else {
+            Self::default()
+        }
+    }
+}
+impl OkvsValue for Node512 {
+    fn is_zero(&self) -> bool {
+        self.0.reduce_or() == 0u64
+    }
+    fn random<R: CryptoRng + RngCore>(mut rng: R) -> Self {
+        Self(u64x8::from_array(core::array::from_fn(|_| rng.next_u64())))
+    }
+    fn inv(&self) -> Self {
+        // debug_assert_eq!(self.0, );
+        self.clone()
+    }
+}
+impl Div for Node512 {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        debug_assert_eq!(rhs.0[0], 1);
+        for i in 1..8 {
+            debug_assert_eq!(rhs.0[0], 0);
+        }
+        self
+    }
+}
+impl SubAssign for Node512 {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.add_assign(rhs)
+    }
+}
+impl From<bool> for Node512 {
+    fn from(value: bool) -> Self {
+        Self(u64x8::from_array([1, 0, 0, 0, 0, 0, 0, 0]))
+    }
+}
+impl Sum for Node512 {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |a, b| a + b)
+    }
+}
+impl Default for Node512 {
+    fn default() -> Self {
+        Self(u64x8::default())
+    }
+}
+impl Sub for Node512 {
+    type Output = Self;
+    fn sub(mut self, rhs: Self) -> Self::Output {
+        self -= rhs;
+        self
+    }
+}
+impl Add for Node512 {
+    type Output = Self;
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self += rhs;
+        self
     }
 }
 impl DpfOutput for Node {}
@@ -79,7 +183,7 @@ impl OkvsValue for Node {
         self.0 == 0u128
     }
     fn inv(&self) -> Self {
-        assert_eq!(self.0, 1u128);
+        debug_assert_eq!(self.0, 1u128);
         self.clone()
     }
 }
@@ -115,7 +219,7 @@ impl From<bool> for Node {
 impl Div for Node {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
-        assert_eq!(rhs.0, 1u128);
+        debug_assert_eq!(rhs.0, 1u128);
         self
     }
 }
@@ -439,7 +543,7 @@ impl<'a> AsMut<[Node]> for BitSliceMut<'a> {
 }
 impl<'a> BitXorAssign<&BitSliceMut<'a>> for BitSliceMut<'a> {
     fn bitxor_assign(&mut self, rhs: &BitSliceMut<'a>) {
-        assert_eq!(self.len, rhs.len);
+        debug_assert_eq!(self.len, rhs.len);
         for i in 0..self.v.len() {
             self.v[i].bitxor_assign(&rhs.v[i]);
         }
@@ -447,7 +551,7 @@ impl<'a> BitXorAssign<&BitSliceMut<'a>> for BitSliceMut<'a> {
 }
 impl<'a> BitXorAssign<&BitVec> for BitSliceMut<'a> {
     fn bitxor_assign(&mut self, rhs: &BitVec) {
-        assert_eq!(self.len, rhs.len);
+        debug_assert_eq!(self.len, rhs.len);
         for i in 0..self.v.len() {
             self.v[i].bitxor_assign(&rhs.v[i]);
         }
@@ -509,7 +613,7 @@ impl From<(&[Node], usize)> for BitVec {
 
 impl BitXorAssign<&BitVec> for BitVec {
     fn bitxor_assign(&mut self, rhs: &BitVec) {
-        assert_eq!(self.len, rhs.len);
+        debug_assert_eq!(self.len, rhs.len);
         for i in 0..self.v.len() {
             self.v[i].bitxor_assign(&rhs.v[i]);
         }

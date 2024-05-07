@@ -308,15 +308,16 @@ impl<Output: DpfOutput> DpfKey<Output> {
                         (my_last_cw).neg()
                     };
                 });
+        } else {
+            cur_seeds
+                .iter()
+                .zip(cur_signs.iter())
+                .zip(output.iter_mut())
+                .for_each(move |((s, t), o)| {
+                    let my_last_cw = Output::from(*s);
+                    *o += if *t { my_last_cw + last_cw } else { my_last_cw };
+                });
         }
-        cur_seeds
-            .iter()
-            .zip(cur_signs.iter())
-            .zip(output.iter_mut())
-            .for_each(move |((s, t), o)| {
-                let my_last_cw = Output::from(*s);
-                *o += if *t { my_last_cw + last_cw } else { my_last_cw };
-            });
     }
     pub fn eval_all(&self) -> Vec<Output> {
         let mut output = vec![Output::default(); 1 << self.input_bits];
