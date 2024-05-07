@@ -717,7 +717,7 @@ pub struct BigStateSession {
 }
 
 impl DmpfSession for BigStateSession {
-    fn get_session(kvs_count: usize) -> Self {
+    fn get_session(kvs_count: usize, _: usize) -> Self {
         Self {
             sign: Signs::new(kvs_count),
             new_sign: Signs::new(kvs_count),
@@ -729,6 +729,9 @@ impl<Output: DpfOutput> DmpfKey<Output> for BigStateDmpfKey<Output> {
     type Session = BigStateSession;
     fn point_count(&self) -> usize {
         self.conv_cw.0.len()
+    }
+    fn input_length(&self) -> usize {
+        self.cws.len()
     }
     fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         let mut seed = self.root;

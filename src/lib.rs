@@ -70,11 +70,11 @@ where
 }
 
 pub trait DmpfSession {
-    fn get_session(kvs_count: usize) -> Self;
+    fn get_session(kvs_count: usize, input_length: usize) -> Self;
 }
 pub struct EmptySession;
 impl DmpfSession for EmptySession {
-    fn get_session(kvs_count: usize) -> Self {
+    fn get_session(kvs_count: usize, input_length: usize) -> Self {
         Self
     }
 }
@@ -86,6 +86,7 @@ where
 {
     type Session: DmpfSession;
     fn point_count(&self) -> usize;
+    fn input_length(&self) -> usize;
     fn eval(&self, input: &u128, output: &mut Output) {
         self.eval_with_session(input, output, &mut self.make_session())
     }
@@ -94,7 +95,7 @@ where
         self.eval_all_with_session(&mut self.make_session())
     }
     fn make_session(&self) -> Self::Session {
-        Self::Session::get_session(self.point_count())
+        Self::Session::get_session(self.point_count(), self.input_length())
     }
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output>;
 }

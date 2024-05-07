@@ -28,7 +28,8 @@ pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) 
     if input.len() < BLOCK_SIZE_INPUT {
         input
             .iter()
-            .zip(output.chunks_exact_mut(2))
+            .rev()
+            .zip(output.chunks_exact_mut(2).rev())
             .for_each(|(i, o)| {
                 let d = double_prg(i, children);
                 (o[0], o[1]) = (d[0], d[1]);
@@ -37,7 +38,8 @@ pub fn double_prg_many(input: &[Node], children: &[u8; 2], output: &mut [Node]) 
 
     input
         .chunks_exact(BLOCK_SIZE_INPUT)
-        .zip(output.chunks_exact_mut(2 * BLOCK_SIZE_INPUT))
+        .rev()
+        .zip(output.chunks_exact_mut(2 * BLOCK_SIZE_INPUT).rev())
         .for_each(|(i, o)| {
             for idx in 0..BLOCK_SIZE_INPUT {
                 o[2 * idx] = i[idx];
@@ -130,7 +132,7 @@ pub fn many_prg(input: &Node, children: impl Iterator<Item = u16> + Clone, outpu
     blocks_output
         .iter_mut()
         .zip(children_copy)
-        .for_each(|(v, child)| {
+        .for_each(|(mut v, child)| {
             *v = input_block;
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
@@ -140,7 +142,7 @@ pub fn many_prg(input: &Node, children: impl Iterator<Item = u16> + Clone, outpu
     blocks_output
         .iter_mut()
         .zip(children)
-        .for_each(|(v, child)| {
+        .for_each(|(mut v, child)| {
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
             v[1] ^= bytes[1];

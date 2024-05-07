@@ -1,6 +1,3 @@
-use std::time::Duration;
-use std::time::Instant;
-
 use super::BITS_OF_SECURITY;
 use crate::prg::double_prg;
 use crate::prg::double_prg_many;
@@ -10,6 +7,7 @@ use crate::utils::BitVec;
 use crate::utils::Node;
 use crate::Dmpf;
 use crate::DmpfKey;
+use crate::DmpfSession;
 use crate::DpfOutput;
 use crate::EmptySession;
 
@@ -49,11 +47,39 @@ impl<Output: DpfOutput> Dmpf<Output> for DpfDmpf {
         ))
     }
 }
+
+pub struct DpfDmpfSession {
+    cur_seeds: Vec<Node>,
+    next_seeds: Vec<Node>,
+    cur_signs: Vec<bool>,
+    next_signs: Vec<bool>,
+}
+impl DmpfSession for DpfDmpfSession {
+    fn get_session(kvs_count: usize, input_bits: usize) -> Self {
+        let mut cur_seeds = Vec::with_capacity(1 << input_bits);
+        let mut next_seeds = Vec::with_capacity(1 << input_bits);
+        let mut cur_signs = Vec::with_capacity(1 << input_bits);
+        let mut next_signs = Vec::with_capacity(1 << input_bits);
+        unsafe { cur_seeds.set_len(1 << input_bits) };
+        unsafe { next_seeds.set_len(1 << input_bits) };
+        unsafe { cur_signs.set_len(1 << input_bits) };
+        unsafe { next_signs.set_len(1 << input_bits) };
+        Self {
+            cur_seeds,
+            cur_signs,
+            next_seeds,
+            next_signs,
+        }
+    }
+}
 pub struct DpfDmpfKey<Output> {
     dpf_keys: Vec<DpfKey<Output>>,
 }
 impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
-    type Session = EmptySession;
+    type Session = DpfDmpfSession;
+    fn input_length(&self) -> usize {
+        self.dpf_keys[0].cws.len()
+    }
     fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         *output = self
             .dpf_keys
@@ -70,11 +96,9 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
     }
     fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
         let mut f: Vec<Output> = self.dpf_keys[0].eval_all();
-        self.dpf_keys[1..].iter().for_each(|k| {
-            f.iter_mut().zip(k.eval_all_into()).for_each(|(o, i)| {
-                *o += i;
-            })
-        });
+        self.dpf_keys[1..]
+            .iter()
+            .for_each(|k| k.eval_all_xor_output_with_session(&mut f, session));
         f
     }
 }
@@ -211,16 +235,32 @@ impl<Output: DpfOutput> DpfKey<Output> {
             *output = output.neg()
         }
     }
-    pub fn eval_all_into(&self) -> impl Iterator<Item = Output> {
-        let mut cur_seeds = Vec::with_capacity(1 << self.input_bits);
-        let mut next_seeds = Vec::with_capacity(1 << self.input_bits);
-        unsafe { cur_seeds.set_len(1 << self.input_bits) };
-        unsafe { next_seeds.set_len(1 << self.input_bits) };
+    pub fn eval_all_xor_output_with_session(
+        &self,
+        output: &mut [Output],
+        session: &mut DpfDmpfSession,
+    ) {
+        let DpfDmpfSession {
+            cur_seeds,
+            next_seeds,
+            cur_signs,
+            next_signs,
+        } = session;
+        self.eval_all_with_cache_xor_output(cur_seeds, next_seeds, cur_signs, next_signs, output)
+    }
+    pub fn eval_all_with_cache_xor_output<'a>(
+        &self,
+        cur_seeds_orig: &'a mut [Node],
+        next_seeds_orig: &mut [Node],
+        cur_signs_orig: &'a mut [bool],
+        next_signs_orig: &mut [bool],
+        output: &mut [Output],
+    ) {
+        let mut cur_seeds = cur_seeds_orig;
+        let mut next_seeds = next_seeds_orig;
+        let mut cur_signs = cur_signs_orig;
+        let mut next_signs = next_signs_orig;
         cur_seeds[0] = self.root;
-        let mut cur_signs = Vec::with_capacity(1 << self.input_bits);
-        let mut next_signs = Vec::with_capacity(1 << self.input_bits);
-        unsafe { cur_signs.set_len(1 << self.input_bits) };
-        unsafe { next_signs.set_len(1 << self.input_bits) };
         cur_signs[0] = self.root_bit;
         for depth in 0..self.input_bits {
             double_prg_many(
@@ -255,19 +295,23 @@ impl<Output: DpfOutput> DpfKey<Output> {
         }
         let last_cw = self.last_cw;
         let root_bit = self.root_bit;
-        let output = cur_seeds.into_iter().zip(cur_signs).map(move |(s, t)| {
-            let my_last_cw = Output::from(s);
-            let o = if t { my_last_cw + last_cw } else { my_last_cw };
-            if root_bit {
-                o.neg()
-            } else {
-                o
-            }
-        });
-        output
+        cur_seeds
+            .iter()
+            .zip(cur_signs.iter())
+            .zip(output.iter_mut())
+            .for_each(move |((s, t), o)| {
+                let my_last_cw = Output::from(*s);
+                *o = if *t { my_last_cw + last_cw } else { my_last_cw };
+                if root_bit {
+                    *o = o.neg();
+                }
+            });
     }
     pub fn eval_all(&self) -> Vec<Output> {
-        self.eval_all_into().collect()
+        let mut output = vec![Output::default(); 1 << self.input_bits];
+        let mut session = DpfDmpfSession::get_session(1, self.input_bits);
+        self.eval_all_xor_output_with_session(&mut output, &mut session);
+        output
     }
 }
 pub fn int_to_bits(mut v: usize, width: usize) -> Vec<bool> {

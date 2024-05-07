@@ -59,6 +59,9 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> DmpfKey<Output>
     for OkvsDmpfKey<BIN_W, W, Output>
 {
     type Session = EmptySession;
+    fn input_length(&self) -> usize {
+        self.cws.len()
+    }
     fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         let input_length = self.cws.len();
         let mut seed = self.seed;

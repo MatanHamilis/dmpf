@@ -119,6 +119,9 @@ pub struct BatchCodeDmpfSession {
 }
 impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
     type Session = BatchCodeDmpfSession;
+    fn input_length(&self) -> usize {
+        self.input_domain_log_size
+    }
     fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
         if session.mapping.is_none() {
             session.init(self);
@@ -158,7 +161,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
     }
 }
 impl DmpfSession for BatchCodeDmpfSession {
-    fn get_session(kvs_count: usize) -> Self {
+    fn get_session(kvs_count: usize, _: usize) -> Self {
         BatchCodeDmpfSession { mapping: None }
     }
 }
