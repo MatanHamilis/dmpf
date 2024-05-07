@@ -30,6 +30,7 @@ pub const BYTES_OF_SECURITY: usize = BITS_OF_SECURITY / BITS_IN_BYTE;
 pub use dpf::DpfDmpf;
 pub use field::{PrimeField64, PrimeField64x2, RadixTwoFftFriendFieldElement};
 pub use rb_okvs::{g, EpsilonPercent, LogN};
+pub use utils::Node512;
 pub use utils::SmallFieldContainer;
 
 pub trait DpfOutput:

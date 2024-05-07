@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dmpf::{
     batch_code::BatchCodeDmpf, big_state::BigStateDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf,
-    DpfKey, DpfOutput, EpsilonPercent, LogN, Node, PrimeField64x2,
+    DpfKey, DpfOutput, EpsilonPercent, LogN, Node, Node512, PrimeField64x2,
 };
 use rand::{thread_rng, RngCore};
 
@@ -112,6 +112,14 @@ fn bench_dpf_dmpf_node(c: &mut Criterion) {
     for input_len in INPUT_LENS {
         for points in POINTS {
             bench_dmpf::<Node, _>(c, "dpf_dmpf_node", &dpf, input_len, points);
+        }
+    }
+}
+fn bench_dpf_dmpf_node512(c: &mut Criterion) {
+    let dpf = DpfDmpf::new();
+    for input_len in INPUT_LENS {
+        for points in POINTS {
+            bench_dmpf::<Node512, _>(c, "dpf_dmpf_node512", &dpf, input_len, points);
         }
     }
 }
@@ -249,6 +257,7 @@ criterion_group!(
     targets = bench_dpf_single,
     bench_dpf_dmpf,
     bench_dpf_dmpf_node,
+    bench_dpf_dmpf_node512,
     bench_big_state_dmpf,
     bench_big_state_dmpf_node,
     bench_batch_code_dmpf,
