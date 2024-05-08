@@ -8,8 +8,8 @@ use dmpf::{
 };
 use rand::{thread_rng, RngCore};
 
-const INPUT_LENS: [usize; 9] = [6, 8, 10, 12, 14, 16, 18, 20, 22];
-const POINTS: [usize; 4] = [10, 5 * 5, 14 * 14, 66 * 66];
+const INPUT_LENS: [usize; 5] = [10, 12, 14, 16, 18];
+const POINTS: [usize; 6] = [9, 10, 11, 12, 13, 14];
 
 fn make_inputs<F: DpfOutput>(input_len: usize, total_inputs: usize) -> Vec<(u128, F)> {
     let domain_size = 1 << input_len;
@@ -172,6 +172,9 @@ fn bench_okvs_dmpf(c: &mut Criterion) {
 fn bench_okvs_dmpf_node(c: &mut Criterion) {
     do_bench_okvs_dmpf::<Node>(c, "okvs_node");
 }
+fn bench_okvs_dmpf_node512(c: &mut Criterion) {
+    do_bench_okvs_dmpf::<Node512>(c, "okvs_node");
+}
 
 fn bench_batch_code_dmpf(c: &mut Criterion) {
     let dpf = BatchCodeDmpf::<PrimeField64x2>::new();
@@ -189,6 +192,14 @@ fn bench_batch_code_dmpf_node(c: &mut Criterion) {
         }
     }
 }
+// fn bench_batch_code_dmpf_node512(c: &mut Criterion) {
+//     let dpf = BatchCodeDmpf::<Node>::new();
+//     for input_len in INPUT_LENS {
+//         for points in POINTS {
+//             bench_dmpf::<Node512, _>(c, "batch_code_node512", &dpf, input_len, points);
+//         }
+//     }
+// }
 
 fn bench_dpf_single(c: &mut Criterion) {
     let mut rng = thread_rng();
@@ -251,6 +262,14 @@ fn bench_big_state_dmpf_node(c: &mut Criterion) {
         }
     }
 }
+fn bench_big_state_dmpf_node512(c: &mut Criterion) {
+    let dpf = BigStateDmpf::new(8);
+    for input_len in INPUT_LENS {
+        for points in POINTS {
+            bench_dmpf::<Node512, _>(c, "big_state_node512", &dpf, input_len, points);
+        }
+    }
+}
 criterion_group!(
     name = benches;
     config = Criterion::default().configure_from_args();
@@ -260,9 +279,12 @@ criterion_group!(
     bench_dpf_dmpf_node512,
     bench_big_state_dmpf,
     bench_big_state_dmpf_node,
+    bench_big_state_dmpf_node512,
     bench_batch_code_dmpf,
     bench_batch_code_dmpf_node,
+    // bench_batch_code_dmpf_node512,
     bench_okvs_dmpf,
-    bench_okvs_dmpf_node
+    bench_okvs_dmpf_node,
+    bench_okvs_dmpf_node512
 );
 criterion_main!(benches);
