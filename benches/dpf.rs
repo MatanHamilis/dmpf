@@ -8,8 +8,8 @@ use dmpf::{
 };
 use rand::{thread_rng, RngCore};
 
-const INPUT_LENS: [usize; 5] = [10, 12, 14, 16, 18];
-const POINTS: [usize; 6] = [9, 10, 11, 12, 13, 14];
+const INPUT_LENS: [usize; 6] = [10, 12, 14, 16, 18, 20];
+const POINTS: [usize; 12] = [2, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240];
 
 fn make_inputs<F: DpfOutput>(input_len: usize, total_inputs: usize) -> Vec<(u128, F)> {
     let domain_size = 1 << input_len;
