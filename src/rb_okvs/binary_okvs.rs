@@ -4,7 +4,6 @@ use std::{
     iter::Sum,
     marker::PhantomData,
     ops::{AddAssign, BitXor, BitXorAssign, Mul, SubAssign},
-    simd::{num::SimdUint, u64x8},
 };
 
 use aes_prng::AesRng;
@@ -184,7 +183,7 @@ pub fn hash_key<const W: usize, K: OkvsKey>(
     m: usize,
     base_seed: &[u8; 16],
 ) -> (usize, [u64; W]) {
-    let (band_start, mut band_iter) = hash_key_compressed::<W, _>(k, m, base_seed);
+    let (band_start, band_iter) = hash_key_compressed::<W, _>(k, m, base_seed);
     let mut output = [0u64; W];
     for (idx, b) in band_iter.enumerate() {
         if !b {

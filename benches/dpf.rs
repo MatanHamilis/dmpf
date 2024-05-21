@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use dmpf::{
-    batch_code::BatchCodeDmpf, big_state::BigStateDmpf, g, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf,
+    batch_code::BatchCodeDmpf, big_state::BigStateDmpf, okvs::OkvsDmpf, Dmpf, DmpfKey, DpfDmpf,
     DpfKey, DpfOutput, EpsilonPercent, LogN, Node, Node512, PrimeField64x2,
 };
 use rand::{thread_rng, RngCore};
@@ -48,11 +48,9 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             format!("{}/Keygen", id),
             format!("{},{}", input_len.to_string(), points),
         ),
-        &(input_len, inputs.clone()),
-        |b, input| {
+        &(),
+        |b, _| {
             let inputs = make_inputs::<F>(input_len, points);
-            let input_len = input.0;
-            let inputs = &input.1;
             b.iter(|| {
                 d.try_gen(input_len, &inputs, &mut rng).unwrap();
             })
@@ -63,11 +61,9 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             format!("{}/EvalSingle", id),
             format!("{},{}", input_len.to_string(), points),
         ),
-        &(input_len, inputs.clone()),
-        |b, input| {
+        &(),
+        |b, _| {
             let inputs = make_inputs::<F>(input_len, points);
-            let input_len = input.0;
-            let inputs = &input.1;
             let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
             let random_point = rng.next_u64() % (1 << input_len);
             let random_point_encoded = (random_point as u128) << (128 - input_len);
@@ -84,13 +80,11 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
             format!("{}/EvalAll", id),
             format!("{},{}", input_len.to_string(), points),
         ),
-        &(input_len, inputs),
-        |b, input| {
+        &(),
+        |b, _| {
             let inputs = make_inputs::<F>(input_len, points);
             b.iter_batched_ref(
                 || {
-                    let input_len = input.0;
-                    let inputs = &input.1;
                     let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
                     k_0
                 },

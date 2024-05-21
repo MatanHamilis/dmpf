@@ -1,4 +1,4 @@
-use std::{fmt::Binary, marker::PhantomData, u128};
+use std::{marker::PhantomData, u128};
 
 use crate::{
     prg::double_prg_many,
@@ -62,7 +62,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> DmpfKey<Output>
     fn input_length(&self) -> usize {
         self.cws.len()
     }
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
+    fn eval_with_session(&self, input: &u128, output: &mut Output, _: &mut Self::Session) {
         let input_length = self.cws.len();
         let mut seed = self.seed;
         let mut sign = self.sign;
@@ -94,7 +94,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> DmpfKey<Output>
     fn point_count(&self) -> usize {
         self.point_count
     }
-    fn eval_all_with_session(&self, session: &mut Self::Session) -> Vec<Output> {
+    fn eval_all_with_session(&self, _: &mut Self::Session) -> Vec<Output> {
         let input_length = self.cws.len();
         let mut sign = vec![self.sign];
         let mut seed = vec![self.seed];
@@ -334,7 +334,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
         seeds_0: &[Node],
         signs_0: &[bool],
         seeds_1: &[Node],
-        signs_1: &[bool],
+        _: &[bool],
         epsilon_percent: EpsilonPercent,
         batch_size: usize,
     ) -> EncodedOkvs<W, Node, Output> {

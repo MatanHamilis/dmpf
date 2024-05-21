@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     iter::Sum,
-    mem::MaybeUninit,
     ops::{
         Add, AddAssign, BitXor, BitXorAssign, Div, Index, IndexMut, Mul, MulAssign, Neg, Sub,
         SubAssign,
@@ -16,7 +15,7 @@ use crate::{
 };
 use rand::{CryptoRng, RngCore};
 
-use crate::{prg::many_prg, BITS_OF_SECURITY, BYTES_OF_SECURITY};
+use crate::{BITS_OF_SECURITY, BYTES_OF_SECURITY};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, Hash)]
 pub struct Node(u128);
@@ -387,54 +386,54 @@ pub trait SmallFieldContainer<const SIZE: usize, F: FieldElement>:
     }
 }
 
-#[derive(Clone)]
-pub struct ExpandedNode {
-    nodes: Box<[Node]>,
-}
-impl ExpandedNode {
-    pub fn new(non_zero_point_count: usize) -> Self {
-        let node_count = 2 + 2 * ((non_zero_point_count + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY);
-        ExpandedNode {
-            nodes: Box::from(vec![Node::default(); node_count]),
-        }
-    }
-    pub fn fill_all(&mut self, node: &Node) {
-        many_prg(node, 0..self.nodes.len() as u16, &mut self.nodes);
-    }
-    pub fn fill(&mut self, node: &Node, direction: bool) {
-        let start = direction as u16;
-        let end = start + self.nodes.len() as u16 - 1;
-        many_prg(
-            node,
-            start..end,
-            &mut self.nodes[start as usize..end as usize],
-        );
-    }
-    pub fn get_bit(&self, idx: usize, direction: bool) -> bool {
-        let bits = self.get_bits_direction(direction);
-        let node = idx / BITS_OF_SECURITY;
-        let bit_idx = idx & (BITS_OF_SECURITY - 1);
-        bits[node].get_bit(bit_idx)
-    }
-    pub fn get_node(&self, direction: bool) -> &Node {
-        &self.nodes[(direction as usize) * (self.nodes.len() - 1)]
-    }
-    pub fn get_node_mut(&mut self, direction: bool) -> &mut Node {
-        &mut self.nodes[(direction as usize) * (self.nodes.len() - 1)]
-    }
-    pub fn get_bits(&self) -> &[Node] {
-        &self.nodes[1..self.nodes.len() - 1]
-    }
-    pub fn get_bits_mut(&mut self) -> &mut [Node] {
-        let len = self.nodes.len();
-        &mut self.nodes[1..len - 1]
-    }
-    pub fn get_bits_direction(&self, direction: bool) -> &[Node] {
-        let direction_len = (self.nodes.len() - 2) / 2;
-        let node = 1 + (direction as usize) * direction_len;
-        &self.nodes[node..node + direction_len]
-    }
-}
+// #[derive(Clone)]
+// pub struct ExpandedNode {
+//     nodes: Box<[Node]>,
+// }
+// impl ExpandedNode {
+//     pub fn new(non_zero_point_count: usize) -> Self {
+//         let node_count = 2 + 2 * ((non_zero_point_count + BITS_OF_SECURITY - 1) / BITS_OF_SECURITY);
+//         ExpandedNode {
+//             nodes: Box::from(vec![Node::default(); node_count]),
+//         }
+//     }
+//     pub fn fill_all(&mut self, node: &Node) {
+//         many_prg(node, 0..self.nodes.len() as u16, &mut self.nodes);
+//     }
+//     pub fn fill(&mut self, node: &Node, direction: bool) {
+//         let start = direction as u16;
+//         let end = start + self.nodes.len() as u16 - 1;
+//         many_prg(
+//             node,
+//             start..end,
+//             &mut self.nodes[start as usize..end as usize],
+//         );
+//     }
+//     pub fn get_bit(&self, idx: usize, direction: bool) -> bool {
+//         let bits = self.get_bits_direction(direction);
+//         let node = idx / BITS_OF_SECURITY;
+//         let bit_idx = idx & (BITS_OF_SECURITY - 1);
+//         bits[node].get_bit(bit_idx)
+//     }
+//     pub fn get_node(&self, direction: bool) -> &Node {
+//         &self.nodes[(direction as usize) * (self.nodes.len() - 1)]
+//     }
+//     pub fn get_node_mut(&mut self, direction: bool) -> &mut Node {
+//         &mut self.nodes[(direction as usize) * (self.nodes.len() - 1)]
+//     }
+//     pub fn get_bits(&self) -> &[Node] {
+//         &self.nodes[1..self.nodes.len() - 1]
+//     }
+//     pub fn get_bits_mut(&mut self) -> &mut [Node] {
+//         let len = self.nodes.len();
+//         &mut self.nodes[1..len - 1]
+//     }
+//     pub fn get_bits_direction(&self, direction: bool) -> &[Node] {
+//         let direction_len = (self.nodes.len() - 2) / 2;
+//         let node = 1 + (direction as usize) * direction_len;
+//         &self.nodes[node..node + direction_len]
+//     }
+// }
 #[derive(Clone, PartialEq, Eq, Debug, Hash, PartialOrd)]
 pub struct BitVec {
     pub(crate) v: Box<[Node]>,

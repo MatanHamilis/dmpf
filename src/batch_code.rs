@@ -161,7 +161,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for BatchCodeDmpfKey<Output> {
     }
 }
 impl DmpfSession for BatchCodeDmpfSession {
-    fn get_session(kvs_count: usize, _: usize) -> Self {
+    fn get_session(_: usize, _: usize) -> Self {
         BatchCodeDmpfSession { mapping: None }
     }
 }

@@ -1,9 +1,8 @@
 use core::panic;
-use std::backtrace;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use dmpf::rb_okvs::{self, g, EpsilonPercent, LogN, OkvsKey, OkvsU128, OkvsValue};
-use dmpf::{Node, PrimeField64x2};
+use dmpf::Node;
 use rand::{thread_rng, CryptoRng, RngCore};
 
 const LAMBDA: usize = 40;
@@ -239,16 +238,16 @@ fn do_bench_decode<K: OkvsKey, V: OkvsValue>(c: &mut Criterion, batch_size: usiz
                         b.iter(|| c.decode(first_key));
                     });
                 }
-                6 => {
-                    group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
-                        let c = rb_okvs::encode::<6, _, _>(
-                            &kvs[..1 << input_log_usize],
-                            epsilon_percent,
-                            batch_size,
-                        );
-                        b.iter(|| c.decode(first_key));
-                    });
-                }
+                // 6 => {
+                //     group.bench_function(format!("decode/log_n:{}", usize::from(input_log)), |b| {
+                //         let c = rb_okvs::encode::<6, _, _>(
+                //             &kvs[..1 << input_log_usize],
+                //             epsilon_percent,
+                //             batch_size,
+                //         );
+                //         b.iter(|| c.decode(first_key));
+                //     });
+                // }
                 7 => {
                     let c = rb_okvs::encode::<7, _, _>(
                         &kvs[..1 << input_log_usize],

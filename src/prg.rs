@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, simd::u64x8};
+use std::simd::u64x8;
 
 use crate::{
     utils::{Node, Node512},
@@ -100,7 +100,7 @@ pub fn triple_prg(input: &Node, children: &[u8; 3]) -> [Node; 3] {
 }
 pub fn many_many_prg(
     input: &[Node],
-    mut children: impl Iterator<Item = u16> + Clone,
+    children: impl Iterator<Item = u16> + Clone,
     output: &mut [Node],
 ) {
     let input_block =
@@ -153,7 +153,7 @@ pub fn many_prg(input: &Node, children: impl Iterator<Item = u16> + Clone, outpu
     blocks_output
         .iter_mut()
         .zip(children_copy)
-        .for_each(|(mut v, child)| {
+        .for_each(|(v, child)| {
             *v = input_block;
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
@@ -163,7 +163,7 @@ pub fn many_prg(input: &Node, children: impl Iterator<Item = u16> + Clone, outpu
     blocks_output
         .iter_mut()
         .zip(children)
-        .for_each(|(mut v, child)| {
+        .for_each(|(v, child)| {
             let bytes = child.to_be_bytes();
             v[0] ^= bytes[0];
             v[1] ^= bytes[1];

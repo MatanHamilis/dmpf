@@ -24,7 +24,7 @@ pub struct TrieNode {
     sons: [Option<Rc<RefCell<TrieNode>>>; 2],
 }
 impl PartialEq for TrieNode {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _: &Self) -> bool {
         false
     }
 }

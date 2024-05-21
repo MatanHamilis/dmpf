@@ -1,8 +1,3 @@
-use std::{
-    ops::Div,
-    time::{Duration, Instant},
-};
-
 use rand::{CryptoRng, RngCore};
 
 use crate::{
@@ -343,7 +338,7 @@ impl CW {
         has_right: bool,
         output_left: &mut [Node],
         output_right: &mut [Node],
-        t: usize,
+        _: usize,
     ) -> Node {
         let mut correct_node = Node::default();
         signs
@@ -512,14 +507,14 @@ impl PrecomputedSignsCW {
         let t = signs.0;
         let nodes_per_direction = t.div_ceil(128);
         let nodes_per_entry = 2 * nodes_per_direction;
-        let min_entries = signs.1.len() / (2 * nodes_per_direction);
+        let _ = signs.1.len() / (2 * nodes_per_direction);
         let v = signs
             .1
             .chunks(batch_size * nodes_per_entry)
             .map(|oc| {
                 let cur_batch_size = oc.len() / nodes_per_entry;
                 let mut v = Vec::with_capacity(nodes_per_entry << cur_batch_size);
-                for i in 0..nodes_per_entry {
+                for _ in 0..nodes_per_entry {
                     v.push(Node::default());
                 }
                 for io in oc.chunks_exact(nodes_per_entry) {

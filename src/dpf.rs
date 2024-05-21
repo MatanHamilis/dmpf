@@ -9,7 +9,6 @@ use crate::Dmpf;
 use crate::DmpfKey;
 use crate::DmpfSession;
 use crate::DpfOutput;
-use crate::EmptySession;
 
 #[derive(Clone, Copy)]
 pub struct CorrectionWord {
@@ -55,7 +54,7 @@ pub struct DpfDmpfSession {
     next_signs: Vec<bool>,
 }
 impl DmpfSession for DpfDmpfSession {
-    fn get_session(kvs_count: usize, input_bits: usize) -> Self {
+    fn get_session(_: usize, input_bits: usize) -> Self {
         let mut cur_seeds = Vec::with_capacity(1 << input_bits);
         let mut next_seeds = Vec::with_capacity(1 << input_bits);
         let mut cur_signs = Vec::with_capacity(1 << input_bits);
@@ -80,7 +79,7 @@ impl<Output: DpfOutput> DmpfKey<Output> for DpfDmpfKey<Output> {
     fn input_length(&self) -> usize {
         self.dpf_keys[0].cws.len()
     }
-    fn eval_with_session(&self, input: &u128, output: &mut Output, session: &mut Self::Session) {
+    fn eval_with_session(&self, input: &u128, output: &mut Output, _: &mut Self::Session) {
         *output = self
             .dpf_keys
             .iter()

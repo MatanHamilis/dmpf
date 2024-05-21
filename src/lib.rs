@@ -76,7 +76,7 @@ pub trait DmpfSession {
 }
 pub struct EmptySession;
 impl DmpfSession for EmptySession {
-    fn get_session(kvs_count: usize, input_length: usize) -> Self {
+    fn get_session(_: usize, _: usize) -> Self {
         Self
     }
 }
