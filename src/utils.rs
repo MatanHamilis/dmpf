@@ -33,7 +33,7 @@ impl BinaryOkvsValue for Node {
         self.0 == 0
     }
 }
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, PartialOrd, Ord)]
 pub struct Node512(u64x8);
 impl DpfOutput for Node512 {}
 impl AddAssign for Node512 {
@@ -59,7 +59,13 @@ impl Neg for Node512 {
 }
 impl MulAssign for Node512 {
     fn mul_assign(&mut self, rhs: Self) {
-        self.0 *= rhs.0;
+        debug_assert_eq!(rhs.0[0], 1);
+        for i in 1..8 {
+            debug_assert_eq!(rhs.0[i], 0);
+        }
+        *self = Node512(u64x8::from_array(core::array::from_fn(|i| {
+            self.0[i] * rhs.0[0]
+        })))
     }
 }
 impl Mul for Node512 {
@@ -87,7 +93,7 @@ impl OkvsValue for Node512 {
         Self(u64x8::from_array(core::array::from_fn(|_| rng.next_u64())))
     }
     fn inv(&self) -> Self {
-        // debug_assert_eq!(self.0, );
+        debug_assert_eq!(self.0[0], 1u64);
         self.clone()
     }
 }
@@ -96,7 +102,7 @@ impl Div for Node512 {
     fn div(self, rhs: Self) -> Self::Output {
         debug_assert_eq!(rhs.0[0], 1);
         for i in 1..8 {
-            debug_assert_eq!(rhs.0[0], 0);
+            debug_assert_eq!(rhs.0[i], 0);
         }
         self
     }
@@ -108,7 +114,7 @@ impl SubAssign for Node512 {
 }
 impl From<bool> for Node512 {
     fn from(value: bool) -> Self {
-        Self(u64x8::from_array([1, 0, 0, 0, 0, 0, 0, 0]))
+        Self(u64x8::from_array([value as u64, 0, 0, 0, 0, 0, 0, 0]))
     }
 }
 impl Sum for Node512 {

@@ -153,7 +153,7 @@ fn match_logn(points: usize) -> Option<LogN> {
 }
 fn do_bench_okvs_dmpf<O: DpfOutput>(c: &mut Criterion, name: &str) {
     // const LAMBDA: usize = 6;
-    const BATCH_SIZE: usize = 1;
+    const BATCH_SIZE: usize = 8;
     let eps = EpsilonPercent::Hundred;
     for input_len in INPUT_LENS {
         for points in POINTS {

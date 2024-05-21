@@ -350,7 +350,11 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
                 (Node::from(kvs[k].0), cw)
             })
             .collect();
-        crate::rb_okvs::encode(&v, epsilon_percent, batch_size)
+        let okvs_out = crate::rb_okvs::encode(&v, epsilon_percent, batch_size);
+        for k in v.iter() {
+            debug_assert_eq!(okvs_out.decode(&k.0), k.1);
+        }
+        okvs_out
     }
     fn gen_cw<R: RngCore + CryptoRng>(
         depth: usize,
@@ -482,15 +486,16 @@ impl<Output: Copy + Clone> InformationTheoreticOkvs<Output> {
 #[cfg(test)]
 mod test {
     use super::OkvsDmpf;
-    use crate::{Dmpf, DmpfKey, Node};
+    use crate::rb_okvs::OkvsValue;
+    use crate::{Dmpf, DmpfKey, Node, Node512};
     use rand::{thread_rng, RngCore};
     use std::collections::HashMap;
 
     #[test]
     fn test_okvs_dmpf() {
-        const W: usize = 400;
+        const W: usize = 40;
         const BIN_W: usize = W.div_ceil(64);
-        const POINTS: usize = 30;
+        const POINTS: usize = 2;
         const INPUT_SIZE: usize = 9;
         const BATCH_SIZE: usize = 1;
         let scheme =

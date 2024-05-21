@@ -152,8 +152,8 @@ impl<const W: usize, V: OkvsValue> MatrixRow<W, V> {
         self.band
             .iter_mut()
             .zip(rhs.band.iter())
-            .for_each(|(a, b)| *a -= factor * *b);
-        self.rhs -= factor * rhs.rhs;
+            .for_each(|(a, b)| *a -= *b * factor);
+        self.rhs -= rhs.rhs * factor;
         // println!("After subtract");
         // dbg!(&self.band);
         self.align()?;

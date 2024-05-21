@@ -3,15 +3,16 @@ use std::{
     hash::Hash,
     iter::Sum,
     marker::PhantomData,
-    ops::{BitXor, BitXorAssign, Mul, SubAssign},
+    ops::{AddAssign, BitXor, BitXorAssign, Mul, SubAssign},
+    simd::{num::SimdUint, u64x8},
 };
 
 use aes_prng::AesRng;
 use rand::{thread_rng, CryptoRng, RngCore, SeedableRng};
 
-use crate::{random_u128, EpsilonPercent, LogN};
+use crate::{random_u128, EpsilonPercent, LogN, Node512};
 
-use super::{OkvsKey, OkvsU128};
+use super::{OkvsKey, OkvsU128, OkvsValue};
 impl BinaryOkvsValue for OkvsU128 {
     fn is_zero(&self) -> bool {
         self.0 == 0
@@ -276,7 +277,10 @@ mod tests {
     use rand::thread_rng;
 
     use super::{encode, BinaryOkvsValue};
-    use crate::rb_okvs::{EpsilonPercent, OkvsKey, OkvsU128};
+    use crate::{
+        rb_okvs::{EpsilonPercent, OkvsKey, OkvsU128},
+        Node512,
+    };
 
     fn test_okvs<const W: usize, K: OkvsKey, V: BinaryOkvsValue>(
         kvs: &[(K, V)],
@@ -296,9 +300,28 @@ mod tests {
     #[test]
     fn test_okvs_small() {
         let kvs = randomize_kvs(300);
-        test_okvs::<7, OkvsU128, OkvsU128>(&kvs, EpsilonPercent::Three);
-        test_okvs::<5, OkvsU128, OkvsU128>(&kvs, EpsilonPercent::Five);
-        test_okvs::<4, OkvsU128, OkvsU128>(&kvs, EpsilonPercent::Seven);
-        test_okvs::<4, OkvsU128, OkvsU128>(&kvs, EpsilonPercent::Ten);
+        test_okvs::<400, OkvsU128, Node512>(&kvs, EpsilonPercent::Three);
+        test_okvs::<5, OkvsU128, Node512>(&kvs, EpsilonPercent::Five);
+        test_okvs::<4, OkvsU128, Node512>(&kvs, EpsilonPercent::Seven);
+        test_okvs::<400, OkvsU128, Node512>(&kvs, EpsilonPercent::Ten);
+    }
+}
+impl BinaryOkvsValue for Node512 {
+    fn is_zero(&self) -> bool {
+        <Self as OkvsValue>::is_zero(&self)
+    }
+    fn random<R: CryptoRng + RngCore>(rng: R) -> Self {
+        <Self as OkvsValue>::random(rng)
+    }
+}
+impl BitXorAssign for Node512 {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        self.add_assign(rhs)
+    }
+}
+impl BitXor for Node512 {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        self + rhs
     }
 }
