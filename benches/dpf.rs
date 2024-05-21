@@ -42,7 +42,6 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
     if points > (1 << (input_len - 1)) {
         return;
     }
-    let inputs = make_inputs::<F>(input_len, points);
     // Generating the key
     c.bench_with_input(
         criterion::BenchmarkId::new(
@@ -51,6 +50,7 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs.clone()),
         |b, input| {
+            let inputs = make_inputs::<F>(input_len, points);
             let input_len = input.0;
             let inputs = &input.1;
             b.iter(|| {
@@ -65,6 +65,7 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs.clone()),
         |b, input| {
+            let inputs = make_inputs::<F>(input_len, points);
             let input_len = input.0;
             let inputs = &input.1;
             let (k_0, _) = d.try_gen(input_len, &inputs, &mut rng).unwrap();
@@ -85,6 +86,7 @@ fn bench_dmpf<F: DpfOutput, D: Dmpf<F>>(
         ),
         &(input_len, inputs),
         |b, input| {
+            let inputs = make_inputs::<F>(input_len, points);
             b.iter_batched_ref(
                 || {
                     let input_len = input.0;
