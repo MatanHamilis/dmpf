@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{borrow::BorrowMut, cell::RefCell, ops::Deref, rc::Rc};
 
 use crate::{
     utils::{BitSlice, BitVec},
@@ -8,6 +8,16 @@ use crate::{
 pub struct BinaryTrie {
     root: Rc<RefCell<TrieNode>>,
     len: usize,
+}
+impl Drop for BinaryTrie {
+    fn drop(&mut self) {
+        self.tear_down()
+    }
+}
+impl BinaryTrie {
+    fn tear_down(&mut self) {
+        TrieNode::tear_down(self.root.deref());
+    }
 }
 impl Default for BinaryTrie {
     fn default() -> Self {
@@ -29,12 +39,24 @@ impl PartialEq for TrieNode {
     }
 }
 impl TrieNode {
+    fn tear_down(node: &RefCell<Self>) {
+        let left = node.borrow_mut().sons[0].take();
+        let right = node.borrow_mut().sons[1].take();
+        if let Some(l) = left {
+            (&*l).borrow_mut().parent = None;
+            TrieNode::tear_down(l.deref())
+        }
+        if let Some(r) = right {
+            (&*r).borrow_mut().parent = None;
+            TrieNode::tear_down(r.deref())
+        }
+    }
     pub fn set_terminal(&mut self, is_terminal: bool) {
         self.is_terminal = is_terminal;
     }
     pub fn connect(node: Rc<RefCell<TrieNode>>, son: Rc<RefCell<TrieNode>>, idx: bool) {
-        node.borrow_mut().sons[idx as usize] = Some(son.clone());
-        son.borrow_mut().parent = Some(node.clone());
+        (&*node).borrow_mut().sons[idx as usize] = Some(son.clone());
+        (&*son).borrow_mut().parent = Some(node.clone());
     }
     pub fn get_son(&self, idx: bool) -> Option<Rc<RefCell<TrieNode>>> {
         self.sons[idx as usize].clone()
@@ -68,7 +90,7 @@ impl BinaryTrie {
             let new_node = cur_node.borrow().get_son(bit).unwrap();
             cur_node = new_node;
         }
-        cur_node.borrow_mut().set_terminal(true);
+        (&*cur_node).borrow_mut().set_terminal(true);
         self.len += 1;
     }
     pub fn iter_at_depth(&self, depth: usize) -> BinaryTrieDepthIter {
