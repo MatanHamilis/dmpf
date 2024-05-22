@@ -154,10 +154,10 @@ fn do_bench_okvs_dmpf<O: DpfOutput>(c: &mut Criterion, name: &str) {
     for input_len in INPUT_LENS {
         for points in POINTS {
             // let w = g(LAMBDA, eps, match_logn(points).unwrap());
-            let w = 12;
+            let w = 59;
             match w {
-                12 => {
-                    let dpf = OkvsDmpf::<1, 12, O>::new(eps, BATCH_SIZE);
+                59 => {
+                    let dpf = OkvsDmpf::<1, 59, O>::new(eps, BATCH_SIZE);
                     bench_dmpf(c, name, &dpf, input_len, points);
                 }
                 168 => {

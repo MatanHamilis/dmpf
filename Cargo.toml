@@ -52,6 +52,9 @@ harness = false
 name = "okvs"
 harness = false
 
+[[bin]]
+name = "estimate_okvs"
+
 
 
 [build]

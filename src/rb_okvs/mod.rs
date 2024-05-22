@@ -448,100 +448,112 @@ pub fn hash_key<const W: usize, K: OkvsKey, V: OkvsValue>(
         core::array::from_fn(|_| V::from(band_iter.next().unwrap())),
     )
 }
+
+pub fn try_encode<const W: usize, K: OkvsKey, V: OkvsValue>(
+    kvs: &[(K, V)],
+    epsilon_percent: EpsilonPercent,
+    batch_size: usize,
+    seed_bytes: [u8; 16],
+) -> Option<EncodedOkvs<W, K, V>> {
+    let epsilon_percent_usize = usize::from(epsilon_percent);
+    let m = ((100 + epsilon_percent_usize) * kvs.len())
+        .div_ceil(100)
+        .max(W + 1);
+    let mut matrix: Vec<_> = kvs
+        .iter()
+        .map(|(k, v)| MatrixRow::<W, V>::from_key_value(k, *v, m, batch_size, &seed_bytes))
+        .collect();
+    matrix.sort_by_key(|f| f.first_col);
+    // Now we start the Gaussian Elimination.
+    // we iterate on the rows
+    for i in 0..matrix.len() - 1 {
+        let start_column = matrix[i].first_col;
+        let row_ref = unsafe { &*(&matrix[i] as *const MatrixRow<W, V>) };
+        // for each row we subtract it from all the rows that contain it.
+        let mut j = i + 1;
+        let mut max_col = start_column;
+        while j < matrix.len() {
+            // If same rows has first non-zero column equal, subtract them.
+            if matrix[j].first_col == start_column {
+                if matrix[j].try_sub_assign(row_ref).is_none() {
+                    return None;
+                };
+                debug_assert!(matrix[j].first_col > start_column);
+                debug_assert_eq!(matrix[j].band[0].inv(), matrix[j].band[0]);
+                max_col = matrix[j].first_col.max(max_col);
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let mut max_index = j;
+        while max_index < matrix.len() && matrix[max_index].first_col < max_col {
+            max_index += 1;
+        }
+        matrix[i + 1..max_index].sort_by_key(|v| v.first_col);
+        // we re-sort the rows according to first non-zero column.
+    }
+
+    let mut output_vector = vec![None; m];
+    // start with back substitution, we start with last line.
+    for i in (0..matrix.len()).rev() {
+        let current_first_col = matrix[i].first_col;
+        let rhs = matrix[i].rhs;
+        debug_assert!(output_vector[current_first_col].is_none());
+        output_vector[current_first_col] = Some(rhs);
+        if i > 0 {
+            let mut j = i - 1;
+            while matrix[j].first_col + W > current_first_col {
+                let col_value = matrix[j].get_bit_value_uncheck(current_first_col);
+                if !col_value.is_zero() {
+                    matrix[j].rhs -= col_value * rhs;
+                }
+                if j > 0 {
+                    j -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    let v: Vec<_> = output_vector
+        .into_iter()
+        .map(|v| {
+            if v.is_none() {
+                V::default()
+            } else {
+                v.unwrap()
+            }
+        })
+        .collect();
+
+    let vv = v
+        .chunks(batch_size)
+        .map(|oc| {
+            let mut cur_v = Vec::with_capacity(1 << oc.len());
+            cur_v.push(V::default());
+            for val in oc.iter().copied() {
+                for i in 0..cur_v.len() {
+                    cur_v.push(cur_v[i] + val);
+                }
+            }
+            cur_v
+        })
+        .collect();
+    Some(EncodedOkvs(v, PhantomData, vv, batch_size, seed_bytes))
+}
 pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(
     kvs: &[(K, V)],
     epsilon_percent: EpsilonPercent,
     batch_size: usize,
 ) -> EncodedOkvs<W, K, V> {
     let mut seed_bytes = [0u8; 16];
-    'outer: loop {
+    loop {
         thread_rng().fill_bytes(&mut seed_bytes);
-        let epsilon_percent_usize = usize::from(epsilon_percent);
-        let m = ((100 + epsilon_percent_usize) * kvs.len())
-            .div_ceil(100)
-            .max(W + 1);
-        let mut matrix: Vec<_> = kvs
-            .iter()
-            .map(|(k, v)| MatrixRow::<W, V>::from_key_value(k, *v, m, batch_size, &seed_bytes))
-            .collect();
-        matrix.sort_by_key(|f| f.first_col);
-        // Now we start the Gaussian Elimination.
-        // we iterate on the rows
-        for i in 0..matrix.len() - 1 {
-            let start_column = matrix[i].first_col;
-            let row_ref = unsafe { &*(&matrix[i] as *const MatrixRow<W, V>) };
-            // for each row we subtract it from all the rows that contain it.
-            let mut j = i + 1;
-            let mut max_col = start_column;
-            while j < matrix.len() {
-                // If same rows has first non-zero column equal, subtract them.
-                if matrix[j].first_col == start_column {
-                    if matrix[j].try_sub_assign(row_ref).is_none() {
-                        continue 'outer;
-                    };
-                    debug_assert!(matrix[j].first_col > start_column);
-                    debug_assert_eq!(matrix[j].band[0].inv(), matrix[j].band[0]);
-                    max_col = matrix[j].first_col.max(max_col);
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-            let mut max_index = j;
-            while max_index < matrix.len() && matrix[max_index].first_col < max_col {
-                max_index += 1;
-            }
-            matrix[i + 1..max_index].sort_by_key(|v| v.first_col);
-            // we re-sort the rows according to first non-zero column.
+        match try_encode(kvs, epsilon_percent, batch_size, seed_bytes) {
+            Some(v) => return v,
+            _ => continue,
         }
-
-        let mut output_vector = vec![None; m];
-        // start with back substitution, we start with last line.
-        for i in (0..matrix.len()).rev() {
-            let current_first_col = matrix[i].first_col;
-            let rhs = matrix[i].rhs;
-            debug_assert!(output_vector[current_first_col].is_none());
-            output_vector[current_first_col] = Some(rhs);
-            if i > 0 {
-                let mut j = i - 1;
-                while matrix[j].first_col + W > current_first_col {
-                    let col_value = matrix[j].get_bit_value_uncheck(current_first_col);
-                    if !col_value.is_zero() {
-                        matrix[j].rhs -= col_value * rhs;
-                    }
-                    if j > 0 {
-                        j -= 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-        let v: Vec<_> = output_vector
-            .into_iter()
-            .map(|v| {
-                if v.is_none() {
-                    V::default()
-                } else {
-                    v.unwrap()
-                }
-            })
-            .collect();
-
-        let vv = v
-            .chunks(batch_size)
-            .map(|oc| {
-                let mut cur_v = Vec::with_capacity(1 << oc.len());
-                cur_v.push(V::default());
-                for val in oc.iter().copied() {
-                    for i in 0..cur_v.len() {
-                        cur_v.push(cur_v[i] + val);
-                    }
-                }
-                cur_v
-            })
-            .collect();
-        return EncodedOkvs(v, PhantomData, vv, batch_size, seed_bytes);
     }
 }
 
