@@ -447,7 +447,7 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
             new_v
         };
         // In this case we go for information theoretic OKVS
-        if points_trie.len() >= (1 << depth) {
+        if (points_trie.len() as u128) >= (1u128 << depth) {
             Okvs::InformationTheoretic(InformationTheoreticOkvs::encode(
                 depth,
                 new_v.into_iter().map(|v| v.1.into()).collect(),
