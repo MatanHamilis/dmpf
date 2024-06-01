@@ -8,8 +8,8 @@ use dmpf::{
 use rand::RngCore;
 
 fn main() {
-    const N: usize = 1 << 18;
-    const TESTS: usize = 1 << 12;
+    const N: usize = 1 << 10;
+    const TESTS: usize = 1 << 15;
     let mut failures = 0;
     let mut rng = AesRng::from_random_seed();
     let kvs: Vec<_> = (0..N)
@@ -21,7 +21,7 @@ fn main() {
         }
         let mut seed = [0u8; 16];
         rng.fill_bytes(&mut seed);
-        let okvs = rb_okvs::try_encode::<26, _, _>(&kvs, dmpf::EpsilonPercent::Hundred, 1, seed);
+        let okvs = rb_okvs::try_encode::<20, _, _>(&kvs, dmpf::EpsilonPercent::Hundred, 1, seed);
         if okvs.is_none() {
             failures += 1;
         }
