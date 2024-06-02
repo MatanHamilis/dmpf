@@ -28,7 +28,6 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
             assert!(inputs[i].0 < inputs[i + 1].0);
         }
 
-        let mut trie = BinaryTrie::default();
         let t = inputs.len();
         let mut signs_0 = KeyGenSigns::new(t);
         let mut signs_1 = KeyGenSigns::new(t);
@@ -51,11 +50,15 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
         let mut new_signs_delta_right = Signs::new(t);
         let mut cws = Vec::with_capacity(input_length);
 
+        let mut words = Vec::with_capacity(inputs.len());
         for input in inputs {
-            let n = Node::from(input.0);
-            let bitslice = BitSlice::new(input_length, std::slice::from_ref(&n));
-            trie.insert(&bitslice);
+            // let n = Node::from(input.0);
+            // let bitslice = BitSlice::new(input_length, std::slice::from_ref(&n));
+            // trie.insert(&bitslice);
+            // words.push(value)
+            words.push(input.0 >> (128 - input_length));
         }
+        let mut trie = BinaryTrie::new(words, input_length);
 
         for depth in 0..input_length {
             let min = t.min(1 << depth);
@@ -64,9 +67,10 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
             let iter = trie.iter_at_depth(depth);
             // Generate CW
             iter.enumerate().for_each(|(idx, node)| {
-                let borrowed = node.borrow();
-                let has_left = borrowed.get_son(false).is_some();
-                let has_right = borrowed.get_son(true).is_some();
+                // let borrowed = node.borrow();
+                // let has_left = borrowed.get_son(false).is_some();
+                // let has_right = borrowed.get_son(true).is_some();
+                let (has_left, has_right) = trie.has_son(node, depth);
                 assert!(has_left | has_right);
                 let current_seed_0 = seed_0[idx];
                 let current_seed_1 = seed_1[idx];
@@ -100,9 +104,10 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
             trie.iter_at_depth(depth)
                 .enumerate()
                 .for_each(|(idx, node)| {
-                    let borrowed = node.borrow();
-                    let has_left = borrowed.get_son(false).is_some();
-                    let has_right = borrowed.get_son(true).is_some();
+                    // let borrowed = node.borrow();
+                    // let has_left = borrowed.get_son(false).is_some();
+                    // let has_right = borrowed.get_son(true).is_some();
+                    let (has_left, has_right) = trie.has_son(node, depth);
                     let current_seed_0 = seed_0[idx];
                     let current_seed_1 = seed_1[idx];
 
@@ -199,8 +204,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
 }
 
 #[derive(Debug, Clone)]
-struct ConvCW<Output: DpfOutput>(Vec<Output>, usize);
-//, Vec<Vec<Output>>);
+struct ConvCW<Output: DpfOutput>(Vec<Output>, usize, Vec<Vec<Output>>);
 impl<Output: DpfOutput> ConvCW<Output> {
     // kvs are sorted, so it's ok.
     fn gen(
@@ -227,28 +231,27 @@ impl<Output: DpfOutput> ConvCW<Output> {
                 }
             })
             .collect();
-        // let vecs = o
-        //     .chunks(batching_factor)
-        //     .map(|oc| {
-        //         let mut v = Vec::with_capacity(1 << oc.len());
-        //         v.push(Output::default());
-        //         for i in oc {
-        //             for j in 0..v.len() {
-        //                 v.push(v[j] + *i)
-        //             }
-        //         }
-        //         debug_assert_eq!(v.len(), 1 << oc.len());
-        //         v
-        //     })
-        //     .collect();
-        Self(o, batching_factor) //, vecs)
+        let vecs = o
+            .chunks(batching_factor)
+            .map(|oc| {
+                let mut v = Vec::with_capacity(1 << oc.len());
+                v.push(Output::default());
+                for i in oc {
+                    for j in 0..v.len() {
+                        v.push(v[j] + *i)
+                    }
+                }
+                debug_assert_eq!(v.len(), 1 << oc.len());
+                v
+            })
+            .collect();
+        Self(o, batching_factor, vecs)
     }
     fn conv_correct(&self, sign: &Signs) -> Output {
-        Output::default()
-        // sign.iter_chunk(self.1)
-        //     .zip(self.2.iter())
-        //     .map(|(b, oi)| oi[b])
-        //     .sum()
+        sign.iter_chunk(self.1)
+            .zip(self.2.iter())
+            .map(|(b, oi)| oi[b])
+            .sum()
     }
 }
 
@@ -257,8 +260,8 @@ impl<Output: DpfOutput> ConvCW<Output> {
 struct CW {
     seeds: Vec<Node>,
     signs: SignsCW,
-    // precomputed_seeds: Vec<Vec<Node>>,
-    // precomputed_signs: PrecomputedSignsCW,
+    precomputed_seeds: Vec<Vec<Node>>,
+    precomputed_signs: PrecomputedSignsCW,
     batch_size: usize,
 }
 impl CW {
@@ -275,9 +278,10 @@ impl CW {
         let mut total_points_next = 0;
         let iter = points.iter_at_depth(depth);
         iter.enumerate().for_each(|(idx, node)| {
-            let borrowed = node.borrow();
-            let has_left = borrowed.get_son(false).is_some();
-            let has_right = borrowed.get_son(true).is_some();
+            // let borrowed = node.borrow();
+            // let has_left = borrowed.get_son(false).is_some();
+            // let has_right = borrowed.get_son(true).is_some();
+            let (has_left, has_right) = points.has_son(node, depth);
             if has_left {
                 signs.flip_bit(false, idx, total_points_next);
                 total_points_next += 1;
@@ -292,24 +296,24 @@ impl CW {
         while seeds.len() < min {
             seeds.push(Node::random(&mut rng));
         }
-        // let precomputed_seeds = seeds
-        //     .chunks(batch_size)
-        //     .map(|oc| {
-        //         let mut v = Vec::with_capacity(1 << oc.len());
-        //         v.push(Node::default());
-        //         for io in oc {
-        //             for j in 0..v.len() {
-        //                 v.push(v[j] ^ *io)
-        //             }
-        //         }
-        //         v
-        //     })
-        //     .collect();
-        // let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
+        let precomputed_seeds = seeds
+            .chunks(batch_size)
+            .map(|oc| {
+                let mut v = Vec::with_capacity(1 << oc.len());
+                v.push(Node::default());
+                for io in oc {
+                    for j in 0..v.len() {
+                        v.push(v[j] ^ *io)
+                    }
+                }
+                v
+            })
+            .collect();
+        let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
 
         Self {
-            // precomputed_signs,
-            // precomputed_seeds,
+            precomputed_signs,
+            precomputed_seeds,
             seeds,
             signs,
             batch_size,
@@ -340,29 +344,29 @@ impl CW {
         has_right: bool,
         output_left: &mut [Node],
         output_right: &mut [Node],
-        t: usize,
+        _: usize,
     ) -> Node {
         let mut correct_node = Node::default();
         signs
             .enumerate()
             .take(self.seeds.len())
             .for_each(|(idx, bits)| {
-                if bits == 0 {
-                    return;
-                }
-                correct_node ^= self.seeds[idx];
-                // correct_node ^= self.precomputed_seeds[idx][bits];
+                // if !bit {
+                //     return;
+                // }
+                // correct_node ^= self.seeds[idx];
+                correct_node ^= self.precomputed_seeds[idx][bits];
                 if has_left {
-                    let coordinates = self.signs.coordinates(false, idx);
-                    // self.precomputed_signs
-                    //     .xor_point_into(output_left, idx, bits, false);
-                    xor_bits(&self.signs.1[coordinates..], output_left, t);
+                    // let coordinates = self.signs.coordinates(false, idx);
+                    self.precomputed_signs
+                        .xor_point_into(output_left, idx, bits, false);
+                    // xor_bits(&self.signs.1[coordinates..], output_left, t);
                 }
                 if has_right {
-                    // self.precomputed_signs
-                    //     .xor_point_into(output_right, idx, bits, true);
-                    let coordinates = self.signs.coordinates(true, idx);
-                    xor_bits(&self.signs.1[coordinates..], output_right, t);
+                    self.precomputed_signs
+                        .xor_point_into(output_right, idx, bits, true);
+                    // let coordinates = self.signs.coordinates(true, idx);
+                    // xor_bits(&self.signs.1[coordinates..], output_right, t);
                 }
             });
         correct_node

@@ -8,10 +8,10 @@ use dmpf::{
 };
 use rand::{thread_rng, RngCore};
 
-const INPUT_LENS: [usize; 5] = [10, 12, 14, 16, 18];
+const INPUT_LENS: [usize; 6] = [10, 12, 14, 16, 18, 126];
 const POINTS: [usize; 12] = [2, 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240];
-const REGULAR_MAX_POINTS: usize = 1000;
-const BIG_STATE_MAX_POINTS: usize = 1000;
+const REGULAR_MAX_POINTS: usize = 100000;
+const BIG_STATE_MAX_POINTS: usize = 100000;
 
 fn make_inputs<F: DpfOutput>(input_len: usize, total_inputs: usize) -> Vec<(u128, F)> {
     let domain_size = 1 << input_len;

@@ -21,7 +21,7 @@ fn main() {
         }
         let mut seed = [0u8; 16];
         rng.fill_bytes(&mut seed);
-        let okvs = rb_okvs::try_encode::<20, _, _>(&kvs, dmpf::EpsilonPercent::Hundred, 1, seed);
+        let okvs = rb_okvs::try_encode::<126, _, _>(&kvs, dmpf::EpsilonPercent::Three, 1, seed);
         if okvs.is_none() {
             failures += 1;
         }

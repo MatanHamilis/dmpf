@@ -194,13 +194,16 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
         let input_len = input_length;
 
         // We initialize the trie with the points.
-        let mut trie = BinaryTrie::default();
+        // let mut trie = BinaryTrie::default();
+        let mut words = Vec::with_capacity(points.len());
         for point in points {
-            trie.insert(&BitSlice::new(
-                input_len,
-                &std::slice::from_ref(&Node::from(point.0)),
-            ));
+            // trie.insert(&BitSlice::new(
+            //     input_len,
+            //     &std::slice::from_ref(&Node::from(point.0)),
+            // ));
+            words.push(point.0 >> (128 - input_len));
         }
+        let trie = BinaryTrie::new(words, input_len);
         let [(seed_0, sign_0), (seed_1, sign_1)] = Self::initialize(rng);
         let mut signs_0 = Vec::with_capacity(t);
         let mut seeds_0 = Vec::with_capacity(t);
@@ -216,7 +219,6 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
             let mut next_seeds_0 = Vec::with_capacity(t);
             let mut next_signs_1 = Vec::with_capacity(t);
             let mut next_seeds_1 = Vec::with_capacity(t);
-            let mut str_bitvec = BitVec::new(depth.max(1));
             let cur_cw = Self::gen_cw(
                 depth,
                 &trie,
@@ -236,21 +238,26 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
                     Some(v) => v,
                 };
 
-                trie_iter.obtain_string(&mut str_bitvec);
+                // trie_iter.obtain_string(&mut str_bitvec);
+                let as_node: Node = Node::from(node << ((128 - depth) & 127));
                 // Correcting first share
-                let mut first_cw = Self::correct(str_bitvec.as_ref()[0], signs_0[idx], &cur_cw);
+                // let mut first_cw = Self::correct(str_bitvec.as_ref()[0], signs_0[idx], &cur_cw);
+                let mut first_cw = Self::correct(as_node, signs_0[idx], &cur_cw);
                 let (first_sign_left, first_sign_right) = first_cw.pop_first_two_bits();
                 let first_signs = [first_sign_left, first_sign_right];
 
                 // Correcting second share
-                let mut second_cw = Self::correct(str_bitvec.as_ref()[0], signs_1[idx], &cur_cw);
+                // let mut second_cw = Self::correct(str_bitvec.as_ref()[0], signs_1[idx], &cur_cw);
+                let mut second_cw = Self::correct(as_node, signs_1[idx], &cur_cw);
                 let (second_sign_left, second_sign_right) = second_cw.pop_first_two_bits();
                 let second_signs = [second_sign_left, second_sign_right];
 
                 let prg_0 = double_prg(&seeds_0[idx], &DOUBLE_PRG_CHILDREN);
                 let prg_1 = double_prg(&seeds_1[idx], &DOUBLE_PRG_CHILDREN);
+                let (has_left, has_right) = trie.has_son(node, depth);
+                let has_sons = [has_left, has_right];
                 for son_direction in 0..=1 {
-                    if node.borrow().get_son(son_direction != 0).is_some() {
+                    if has_sons[son_direction] {
                         let mut cur_0 = prg_0[son_direction];
                         let mut cur_1 = prg_1[son_direction];
                         let (cur_bit_0, _) = cur_0.pop_first_two_bits();
@@ -382,8 +389,8 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
                 None => break,
                 Some(v) => v,
             };
-            let mut str = BitVec::new(depth.max(1));
-            trie_iterator.obtain_string(&mut str);
+            // let mut str = BitVec::new(depth.max(1));
+            // trie_iterator.obtain_string(&mut str);
             let [mut left_0, mut right_0] = double_prg(&seed_0[idx], &DOUBLE_PRG_CHILDREN);
             let (left_sign_0, _) = left_0.pop_first_two_bits();
             let (right_sign_0, _) = right_0.pop_first_two_bits();
@@ -394,17 +401,18 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
             let delta_seed_right = &right_0 ^ &right_1;
             let delta_sign_left = left_sign_0 ^ left_sign_1;
             let delta_sign_right = right_sign_0 ^ right_sign_1;
-            let (left_son, right_son) = {
-                let node_borrow = node.borrow();
-                (node_borrow.get_son(false), node_borrow.get_son(true))
-            };
-            let r = if left_son.is_some() && right_son.is_some() {
+            // let (left_son, right_son) = {
+            //     let node_borrow = node.borrow();
+            //     (node_borrow.get_son(false), node_borrow.get_son(true))
+            // };
+            let (has_left, has_right) = points_trie.has_son(node, depth);
+            let r = if has_left && has_right {
                 let mut r: Node = random_u126(rng).into();
                 r.push_first_two_bits(!delta_sign_left, !delta_sign_right);
                 r
             } else {
-                debug_assert!(left_son.is_some() || right_son.is_some());
-                let (mut r, left_sign, right_sign) = if left_son.is_some() {
+                debug_assert!(has_left || has_right);
+                let (mut r, left_sign, right_sign) = if has_left {
                     (delta_seed_right, !delta_sign_left, delta_sign_right)
                 } else {
                     (delta_seed_left, delta_sign_left, !delta_sign_right)
@@ -412,7 +420,8 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
                 r.push_first_two_bits(left_sign, right_sign);
                 r
             };
-            v.push((str.as_ref()[0].into(), u128::from(r)));
+            // v.push((str.as_ref()[0].into(), u128::from(r)));
+            v.push((node << ((128 - depth) & 127), u128::from(r)));
             idx += 1;
         }
         let mut candidate = 0;
