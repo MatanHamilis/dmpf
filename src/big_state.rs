@@ -290,24 +290,30 @@ impl CW {
         while seeds.len() < min {
             seeds.push(Node::random(&mut rng));
         }
-        let precomputed_seeds = seeds
-            .chunks(batch_size)
-            .map(|oc| {
-                let mut v = Vec::with_capacity(1 << oc.len());
-                v.push(Node::default());
-                for io in oc {
-                    for j in 0..v.len() {
-                        v.push(v[j] ^ *io)
-                    }
-                }
-                v
-            })
-            .collect();
-        let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
+        // let precomputed_seeds = seeds
+        //     .chunks(batch_size)
+        //     .map(|oc| {
+        //         let mut v = Vec::with_capacity(1 << oc.len());
+        //         v.push(Node::default());
+        //         for io in oc {
+        //             for j in 0..v.len() {
+        //                 v.push(v[j] ^ *io)
+        //             }
+        //         }
+        //         v
+        //     })
+        //     .collect();
+        // let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
 
+        // temp hack to bench bigstate
         Self {
-            precomputed_signs,
-            precomputed_seeds,
+            precomputed_seeds: Vec::new(),
+            precomputed_signs: PrecomputedSignsCW {
+                v: Vec::new(),
+                t,
+                nodes_per_direction: 5,
+                nodes_per_entry: 3,
+            },
             seeds,
             signs,
             batch_size,
