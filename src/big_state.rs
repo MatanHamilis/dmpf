@@ -199,7 +199,8 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
 }
 
 #[derive(Debug, Clone)]
-struct ConvCW<Output: DpfOutput>(Vec<Output>, usize, Vec<Vec<Output>>);
+struct ConvCW<Output: DpfOutput>(Vec<Output>, usize);
+//, Vec<Vec<Output>>);
 impl<Output: DpfOutput> ConvCW<Output> {
     // kvs are sorted, so it's ok.
     fn gen(
@@ -226,27 +227,28 @@ impl<Output: DpfOutput> ConvCW<Output> {
                 }
             })
             .collect();
-        let vecs = o
-            .chunks(batching_factor)
-            .map(|oc| {
-                let mut v = Vec::with_capacity(1 << oc.len());
-                v.push(Output::default());
-                for i in oc {
-                    for j in 0..v.len() {
-                        v.push(v[j] + *i)
-                    }
-                }
-                debug_assert_eq!(v.len(), 1 << oc.len());
-                v
-            })
-            .collect();
-        Self(o, batching_factor, vecs)
+        // let vecs = o
+        //     .chunks(batching_factor)
+        //     .map(|oc| {
+        //         let mut v = Vec::with_capacity(1 << oc.len());
+        //         v.push(Output::default());
+        //         for i in oc {
+        //             for j in 0..v.len() {
+        //                 v.push(v[j] + *i)
+        //             }
+        //         }
+        //         debug_assert_eq!(v.len(), 1 << oc.len());
+        //         v
+        //     })
+        //     .collect();
+        Self(o, batching_factor) //, vecs)
     }
     fn conv_correct(&self, sign: &Signs) -> Output {
-        sign.iter_chunk(self.1)
-            .zip(self.2.iter())
-            .map(|(b, oi)| oi[b])
-            .sum()
+        Output::default()
+        // sign.iter_chunk(self.1)
+        //     .zip(self.2.iter())
+        //     .map(|(b, oi)| oi[b])
+        //     .sum()
     }
 }
 
@@ -255,8 +257,8 @@ impl<Output: DpfOutput> ConvCW<Output> {
 struct CW {
     seeds: Vec<Node>,
     signs: SignsCW,
-    precomputed_seeds: Vec<Vec<Node>>,
-    precomputed_signs: PrecomputedSignsCW,
+    // precomputed_seeds: Vec<Vec<Node>>,
+    // precomputed_signs: PrecomputedSignsCW,
     batch_size: usize,
 }
 impl CW {
@@ -305,15 +307,9 @@ impl CW {
         //     .collect();
         // let precomputed_signs = PrecomputedSignsCW::new(&signs, batch_size);
 
-        // temp hack to bench bigstate
         Self {
-            precomputed_seeds: Vec::new(),
-            precomputed_signs: PrecomputedSignsCW {
-                v: Vec::new(),
-                t,
-                nodes_per_direction: 5,
-                nodes_per_entry: 3,
-            },
+            // precomputed_signs,
+            // precomputed_seeds,
             seeds,
             signs,
             batch_size,
@@ -344,29 +340,29 @@ impl CW {
         has_right: bool,
         output_left: &mut [Node],
         output_right: &mut [Node],
-        _: usize,
+        t: usize,
     ) -> Node {
         let mut correct_node = Node::default();
         signs
             .enumerate()
             .take(self.seeds.len())
             .for_each(|(idx, bits)| {
-                // if !bit {
-                //     return;
-                // }
-                // correct_node ^= self.seeds[idx];
-                correct_node ^= self.precomputed_seeds[idx][bits];
+                if bits == 0 {
+                    return;
+                }
+                correct_node ^= self.seeds[idx];
+                // correct_node ^= self.precomputed_seeds[idx][bits];
                 if has_left {
-                    // let coordinates = self.signs.coordinates(false, idx);
-                    self.precomputed_signs
-                        .xor_point_into(output_left, idx, bits, false);
-                    // xor_bits(&self.signs.1[coordinates..], output_left, t);
+                    let coordinates = self.signs.coordinates(false, idx);
+                    // self.precomputed_signs
+                    //     .xor_point_into(output_left, idx, bits, false);
+                    xor_bits(&self.signs.1[coordinates..], output_left, t);
                 }
                 if has_right {
-                    self.precomputed_signs
-                        .xor_point_into(output_right, idx, bits, true);
-                    // let coordinates = self.signs.coordinates(true, idx);
-                    // xor_bits(&self.signs.1[coordinates..], output_right, t);
+                    // self.precomputed_signs
+                    //     .xor_point_into(output_right, idx, bits, true);
+                    let coordinates = self.signs.coordinates(true, idx);
+                    xor_bits(&self.signs.1[coordinates..], output_right, t);
                 }
             });
         correct_node
