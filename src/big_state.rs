@@ -58,7 +58,7 @@ impl<Output: DpfOutput> Dmpf<Output> for BigStateDmpf {
             // words.push(value)
             words.push(input.0 >> (128 - input_length));
         }
-        let mut trie = BinaryTrie::new(words, input_length);
+        let trie = BinaryTrie::new(words, input_length);
 
         for depth in 0..input_length {
             let min = t.min(1 << depth);

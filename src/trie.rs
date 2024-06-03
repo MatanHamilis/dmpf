@@ -185,16 +185,34 @@
 //     }
 // }
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 
 pub struct BinaryTrie {
     words: Vec<u128>,
+    prefixes: HashMap<(u128, usize), [bool; 2]>,
     depth: usize,
 }
 impl BinaryTrie {
     pub fn new(mut words: Vec<u128>, depth: usize) -> Self {
         words.sort();
-        Self { words, depth }
+        let mut prefixes = HashMap::with_capacity(words.len() * depth);
+        for w in words.iter().copied() {
+            for d in 0..depth {
+                let msg = w >> (depth - d);
+                let next_bit = ((w >> (depth - d - 1)) & 1) as usize;
+                prefixes
+                    .entry((msg, d))
+                    .and_modify(|v: &mut [bool; 2]| v[next_bit] = true)
+                    .or_insert(core::array::from_fn(|i| i == next_bit));
+            }
+        }
+        Self {
+            words,
+            depth,
+            prefixes,
+        }
     }
     pub fn iter_at_depth(&self, iter_depth: usize) -> impl Iterator<Item = u128> + '_ {
         self.words
@@ -203,17 +221,21 @@ impl BinaryTrie {
             .dedup()
     }
     pub fn has_son(&self, prefix: u128, prefix_len: usize) -> (bool, bool) {
-        let prefix_with_one = (prefix << 1) + 1;
-        let prefix_with_zero = prefix << 1;
-        let result_zero = self
-            .words
-            .binary_search_by(|v| (v >> (self.depth - prefix_len - 1)).cmp(&prefix_with_zero))
-            .is_ok();
-        let result_one = self
-            .words
-            .binary_search_by(|v| (v >> (self.depth - prefix_len - 1)).cmp(&prefix_with_one))
-            .is_ok();
-        (result_zero, result_one)
+        match self.prefixes.get(&(prefix, prefix_len)) {
+            None => panic!(),
+            Some(v) => (v[0], v[1]),
+        }
+        // let prefix_with_one = (prefix << 1) + 1;
+        // let prefix_with_zero = prefix << 1;
+        // let result_zero = self
+        //     .words
+        //     .binary_search_by(|v| (v >> (self.depth - prefix_len - 1)).cmp(&prefix_with_zero))
+        //     .is_ok();
+        // let result_one = self
+        //     .words
+        //     .binary_search_by(|v| (v >> (self.depth - prefix_len - 1)).cmp(&prefix_with_one))
+        //     .is_ok();
+        // (result_zero, result_one)
     }
     pub fn len(&self) -> usize {
         self.words.len()
