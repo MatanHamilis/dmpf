@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use aes_prng::AesRng;
 use dmpf::{
     rb_okvs::{self, OkvsBool, OkvsValue},
-    DpfOutput, Node,
+    Node,
 };
 use rand::RngCore;
 

@@ -3,7 +3,7 @@ use rand::{CryptoRng, RngCore};
 use crate::{
     prg::{double_prg, double_prg_many, many_many_prg, many_prg, DOUBLE_PRG_CHILDREN},
     trie::BinaryTrie,
-    BitSlice, Dmpf, DmpfKey, DmpfSession, DpfOutput, Node,
+    Dmpf, DmpfKey, DmpfSession, DpfOutput, Node,
 };
 
 pub struct BigStateDmpf {
