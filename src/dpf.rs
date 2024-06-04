@@ -54,7 +54,10 @@ pub struct DpfDmpfSession {
     next_signs: Vec<bool>,
 }
 impl DmpfSession for DpfDmpfSession {
-    fn get_session(_: usize, input_bits: usize) -> Self {
+    fn get_session(_: usize, mut input_bits: usize) -> Self {
+        if input_bits > 27 {
+            input_bits = 1;
+        }
         let mut cur_seeds = Vec::with_capacity(1 << input_bits);
         let mut next_seeds = Vec::with_capacity(1 << input_bits);
         let mut cur_signs = Vec::with_capacity(1 << input_bits);
