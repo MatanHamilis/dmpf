@@ -14,8 +14,6 @@ use crate::{
     prg::{double_prg, DOUBLE_PRG_CHILDREN},
     random_u126, random_u128,
     trie::BinaryTrie,
-    utils::BitSlice,
-    utils::BitVec,
     utils::Node,
     Dmpf, DmpfKey, DpfOutput, BITS_OF_SECURITY,
 };
@@ -271,8 +269,8 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput + OkvsValue> Dmpf<Out
                         let mut cur_1 = prg_1[son_direction];
                         let (cur_bit_0, _) = cur_0.pop_first_two_bits();
                         let (cur_bit_1, _) = cur_1.pop_first_two_bits();
-                        assert_eq!(&cur_0 ^ &first_cw, &cur_1 ^ &second_cw);
-                        assert_eq!(
+                        debug_assert_eq!(&cur_0 ^ &first_cw, &cur_1 ^ &second_cw);
+                        debug_assert_eq!(
                             cur_bit_0 ^ first_signs[son_direction],
                             cur_bit_1 ^ second_signs[son_direction]
                         );
@@ -349,7 +347,6 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
             .map(|k| {
                 let out_0 = Output::from(seeds_0[k]);
                 let out_1 = Output::from(seeds_1[k]);
-                // let delta_g = out_0 - out_1;
                 let mut cw = out_0 - out_1 - kvs[k].1;
                 if signs_0[k] {
                     cw = -cw;
@@ -358,9 +355,6 @@ impl<const BIN_W: usize, const W: usize, Output: DpfOutput> OkvsDmpf<BIN_W, W, O
             })
             .collect();
         let okvs_out = crate::rb_okvs::encode(&v, epsilon_percent, batch_size);
-        for k in v.iter() {
-            debug_assert_eq!(okvs_out.decode(&k.0), k.1);
-        }
         okvs_out
     }
     fn gen_cw<R: RngCore + CryptoRng>(
@@ -495,8 +489,7 @@ impl<Output: Copy + Clone> InformationTheoreticOkvs<Output> {
 #[cfg(test)]
 mod test {
     use super::OkvsDmpf;
-    use crate::rb_okvs::OkvsValue;
-    use crate::{Dmpf, DmpfKey, Node, Node512};
+    use crate::{Dmpf, DmpfKey, Node};
     use rand::{thread_rng, RngCore};
     use std::collections::HashMap;
 

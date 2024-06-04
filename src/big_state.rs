@@ -408,48 +408,6 @@ fn copy_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
     }
     // src[to_move - 1] ^= dest[to_move - 1];
 }
-// fn move_bits(src: &[Node], dest: &mut [Node], bit_count: usize, xor: bool) {
-//     let mut bits_to_take_remaining = bit_count;
-//     let mut current_source_bits_pointer = src_start;
-//     let mut current_dest_bits_pointer = dest_start;
-//     // handle remaining nodes
-//     while bits_to_take_remaining > 0 {
-//         let current_bit_take_offset = current_source_bits_pointer & 127;
-//         let current_bit_put_offset = current_dest_bits_pointer & 127;
-//         let bits_to_take_now = usize::min(
-//             usize::min(128 - current_bit_take_offset, 128 - current_bit_put_offset),
-//             bits_to_take_remaining,
-//         );
-
-//         let take_from_idx = current_source_bits_pointer >> 7;
-//         let put_into_idx = current_dest_bits_pointer >> 7;
-
-//         let mut bits_taken = src[take_from_idx];
-//         bits_taken.shr(current_bit_take_offset as u32);
-//         bits_taken.mask_lsbs(bits_to_take_now);
-
-//         bits_taken.shl(current_bit_put_offset as u32);
-//         // This is since we don't assume dest is zeroed.
-//         if !xor {
-//             dest[put_into_idx].mask_bits_lsbs(
-//                 current_bit_put_offset,
-//                 current_bit_put_offset + bits_to_take_now,
-//             );
-//         }
-//         dest[put_into_idx] ^= bits_taken;
-
-//         // Update pointers
-//         current_source_bits_pointer += bits_to_take_now;
-//         current_dest_bits_pointer += bits_to_take_now;
-//         bits_to_take_remaining -= bits_to_take_now;
-//     }
-// }
-// fn xor_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
-//     move_bits(src, dest, bit_count, true)
-// }
-// fn copy_bits(src: &[Node], dest: &mut [Node], bit_count: usize) {
-//     move_bits(src, dest, bit_count, false)
-// }
 
 // This is used to store the signs of the CWs.
 // Each CW is of length t*(Lambda + 2*t) bits.

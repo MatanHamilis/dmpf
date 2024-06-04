@@ -365,6 +365,8 @@ impl<const W: usize, K: OkvsKey, V: OkvsValue> EncodedOkvs<W, K, V> {
         let rounded_offset = offset / self.3;
         let slice = &self.2[rounded_offset..];
         bits.zip(slice).map(|(bit, v)| v[bit]).sum()
+        // let slice = &self.2[..];
+        // bits.zip(slice).map(|(bit, v)| V::default()).sum()
     }
 }
 
@@ -540,6 +542,7 @@ pub fn try_encode<const W: usize, K: OkvsKey, V: OkvsValue>(
             cur_v
         })
         .collect();
+    // let vv = vec![];
     Some(EncodedOkvs(v, PhantomData, vv, batch_size, seed_bytes))
 }
 pub fn encode<const W: usize, K: OkvsKey, V: OkvsValue>(

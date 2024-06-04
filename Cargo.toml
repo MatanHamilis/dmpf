@@ -11,6 +11,7 @@ dmpf = {path = "."}
 ole-pcg = {path = "ole-pcg"}
 rand_chacha = "0.3.1"
 itertools = "0.13"
+fpe = "0.6.1"
 
 # rb-okvs = {path = "rb-okvs"}
 
@@ -32,6 +33,7 @@ rand = {workspace = true}
 aes-prng = {workspace = true}
 rand_chacha = {workspace = true}
 itertools = {workspace = true}
+fpe = {workspace = true}
 
 # rb-okvs = {workspace = true}
 
@@ -52,6 +54,10 @@ harness = false
 
 [[bench]]
 name = "okvs"
+harness = false
+
+[[bench]]
+name = "fpe"
 harness = false
 
 [[bin]]
