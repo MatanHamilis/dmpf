@@ -6,7 +6,7 @@ For further information on the benchmarks please use the `benches` directory.
 
 ## Useful FFT Benchmarks
 We provide some useful FFT benchmarks in the `ole-pcg/benches/fft.rs` file. 
-To run them for benchmark sizes of $$2^17$$ to $$2^25$$, use the following command:
+To run them for benchmark sizes of $$2^{17}$$ to $$2^{25}$$, use the following command:
 
 ```bash
 FFT_BENCH_MIN_LOG_SIZE=17 FFT_BENCH_MAX_LOG_SIZE=25 cargo bench --workspace --bench fft 
