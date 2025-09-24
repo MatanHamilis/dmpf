@@ -13,7 +13,7 @@ use ring::{ModuloPolynomial, PolynomialRingElement, SparsePolynomialRingElement}
 
 use crate::polynomial::{from_share, from_share_regular_error};
 
-mod fft;
+pub mod fft;
 mod polynomial;
 pub mod ring;
 enum Role {
@@ -153,7 +153,6 @@ impl<
             self.sparse_polynomials[0].modulo().clone(),
             self.compression_factor,
         );
-        println!("First part: {}", time.elapsed().as_millis());
         let time = Instant::now();
         assert_eq!(my_polynomials.len(), self.sparse_polynomials.len());
         let multiplicative_share_poly: PolynomialRingElement<F, M> = my_polynomials
@@ -167,7 +166,6 @@ impl<
             Role::First => tensor_product(&my_polynomials, &peer_polynomials),
             Role::Second => tensor_product(&peer_polynomials, &my_polynomials),
         };
-        println!("Second part: {}", time.elapsed().as_millis());
         let time = Instant::now();
         assert_eq!(
             self.tensor_product_fss.len(),
@@ -183,17 +181,14 @@ impl<
                     (*k_0, &k_1[..]),
                     self.sparse_polynomials[0].modulo().deg() * 2,
                 );
-                println!("Polynomial restore: {}", time.elapsed().as_millis());
                 let time = Instant::now();
                 let dense_poly = p.get_modulo().modulo(dense_poly);
                 let dense_ring_element =
                     PolynomialRingElement::new(dense_poly, p.get_modulo().clone());
                 let o = p * &dense_ring_element;
-                println!("mod + Polynomial mul: {}", time.elapsed().as_millis());
                 o
             })
             .sum();
-        println!("Third part: {}", time.elapsed().as_millis());
         (multiplicative_share_poly, additive_share_poly)
     }
 }
@@ -465,7 +460,6 @@ mod tests {
         // let dmpf = BatchCodeDmpf::new(4, 50);
         let modulo_polynomial =
             TwoPowerDegreeCyclotomicPolynomial::<PrimeField64>::new(LOG_POLYNOMIAL_DEGREE);
-        let time = Instant::now();
         let (first, second) = gen::<2, _, PrimeField64x2, _, _>(
             LOG_POLYNOMIAL_DEGREE,
             COMPRESSION_FACTOR,
@@ -473,13 +467,8 @@ mod tests {
             WEIGHT,
             &dmpf,
         );
-        println!("OLE PCG took: {}", time.elapsed().as_millis());
-        let time = Instant::now();
         let first_shares = first.expand();
-        println!("Expand took: {}", time.elapsed().as_millis());
-        let time = Instant::now();
         let second_shares = second.expand();
-        println!("Expand took: {}", time.elapsed().as_millis());
 
         assert_eq!(
             &first_shares.0 * &second_shares.0,
@@ -496,7 +485,6 @@ mod tests {
         // let dmpf = BatchCodeDmpf::new(4, 50);
         let modulo_polynomial =
             TwoPowerDegreeCyclotomicPolynomial::<PrimeField64>::new(LOG_POLYNOMIAL_DEGREE);
-        let time = Instant::now();
         let (first, second) = gen_regular::<2, _, PrimeField64x2, _, _>(
             LOG_POLYNOMIAL_DEGREE,
             COMPRESSION_FACTOR,
@@ -504,14 +492,9 @@ mod tests {
             WEIGHT,
             &dmpf,
         );
-        println!("OLE PCG took: {}", time.elapsed().as_millis());
 
-        let time = Instant::now();
         let first_shares = first.expand();
-        println!("Expand took: {}", time.elapsed().as_millis());
-        let time = Instant::now();
         let second_shares = second.expand();
-        println!("Expand took: {}", time.elapsed().as_millis());
 
         let mul = &first_shares.0 * &second_shares.0;
         let add = &first_shares.1 + &second_shares.1;

@@ -6,13 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = {workspace = true}
-dmpf = {workspace = true}
-aes-prng = {workspace = true}
+rand = { workspace = true }
+dmpf = { workspace = true }
+aes-prng = { workspace = true }
 # rb-okvs = {workspace = true}
 
 [[bench]]
 name = "ole_pcg"
+harness = false
+
+[[bench]]
+name = "fft"
 harness = false
 
 [dev-dependencies]
